@@ -1,6 +1,6 @@
 
-TrueCrypt 1.0 Source Code Distribution
-Copyright (C) 2004 TrueCrypt Team, truecrypt.org
+TrueCrypt 2.0 Source Code Distribution
+Copyright (C) 2004 TrueCrypt Foundation
 
 See 'Docs\License.txt' file for license covering this distribution.
 See 'Release\Setup files\TrueCrypt User Guide.pdf' file for more information.
@@ -10,15 +10,12 @@ Requirements for building TrueCrypt:
 
 - Microsoft Visual Studio .NET 2003
 - Windows XP (build 2600 or higher) Driver Development Kit
-- Windows 95 or 98 Driver Development Kit
 
 
 Before building TrueCrypt:
 
 - Open 'Driver\Makefile' and change the 'DDK' variable to point to your
   Windows XP DDK directory
-- Open 'Driver VXD\Makefile' and change the 'DDK' variable to point to your
-  Windows 95 DDK directory
 - Open 'Service\Service.vcproj' and change all 'AdditionalIncludeDirectories'
   variables to include your Windows XP DDK installation directory
 
