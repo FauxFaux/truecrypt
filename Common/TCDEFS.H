@@ -1,15 +1,15 @@
 /* The source code contained in this file has been derived from the source code
    of Encryption for the Masses 2.02a by Paul Le Roux. Modifications and
-   additions to that source code contained in this file are Copyright (c) 2004
+   additions to that source code contained in this file are Copyright (c) 2004-2005
    TrueCrypt Foundation and Copyright (c) 2004 TrueCrypt Team. Unmodified
    parts are Copyright (c) 1998-99 Paul Le Roux. This is a TrueCrypt Foundation
    release. Please see the file license.txt for full license details. */
 
 // Version displayed to user 
-#define VERSION_STRING                  "3.0a"
+#define VERSION_STRING                  "3.1a"
 
 // Version number to compare against driver
-#define VERSION_NUM						0x030a
+#define VERSION_NUM						0x031a
 
 // Version number written to volume header during format,
 // specifies the minimum program version required to mount the volume
@@ -54,6 +54,8 @@
 #define ERR_VOL_MOUNT_FAILED            36
 #define ERR_INVALID_DEVICE              37
 #define ERR_ACCESS_DENIED               38
+
+#define ERR_DONT_REPORT                 100
 
 #define MIN_VOLUME_SIZE                 19456
 #define MIN_HIDDEN_VOLUME_HOST_SIZE     ( MIN_VOLUME_SIZE * 2 + HIDDEN_VOL_HEADER_OFFSET + HEADER_SIZE )

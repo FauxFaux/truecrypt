@@ -1,6 +1,6 @@
 /* The source code contained in this file has been derived from the source code
    of Encryption for the Masses 2.02a by Paul Le Roux. Modifications and
-   additions to that source code contained in this file are Copyright (c) 2004
+   additions to that source code contained in this file are Copyright (c) 2004-2005
    TrueCrypt Foundation and Copyright (c) 2004 TrueCrypt Team. Unmodified
    parts are Copyright (c) 1998-99 Paul Le Roux. This is a TrueCrypt Foundation
    release. Please see the file license.txt for full license details. */
@@ -19,6 +19,7 @@
 #include "dlgcode.h"
 #include "combo.h"
 #include "registry.h"
+#include "../common/common.h"
 #include "../common/resource.h"
 #include "random.h"
 #include "fat.h"
@@ -71,8 +72,7 @@ int nMultiplier = 1024*1024;		/* Size selection multiplier.  */
 char szFileName[TC_MAX_PATH];	/* The file selected by the user */
 char szDiskFile[TC_MAX_PATH];	/* Fully qualified name derived from szFileName */
 
-BOOL bThreadCancel = FALSE;	/* If the user cancels the volume formatting;
-				   this is set */
+BOOL bThreadCancel = FALSE;		/* TRUE if the user cancels the volume formatting */
 BOOL bThreadRunning = FALSE;	/* Is the thread running */
 
 BOOL bDevice = FALSE;		/* Is this a partition volume ? */
@@ -133,6 +133,8 @@ LoadSettings (HWND hwndDlg)
 void
 SaveSettings (HWND hwndDlg)
 {
+	if (IsNonInstallMode ()) return;
+
 	if (hwndDlg != NULL)
 		DumpCombo (GetDlgItem (hwndDlg, IDC_COMBO_BOX), "LastMountedVolume", !bHistory);
 
@@ -447,8 +449,15 @@ formatThreadFunction (void *hwndDlg)
 		if (!(bHiddenVol && !bHiddenVolHost))	// Do not ask for permission to overwrite an existing volume if we're creating a hidden volume within it
 		{
 			char drive[] = { driveNo == -1 ? 0 : '(', driveNo + 'A', ':', ')', ' ', 0 };
+			char type[20];
 
-			sprintf (szTmp, getstr (IDS_OVERWRITEPROMPT_DEVICE), szFileName, drive);
+			if (strstr (szFileName, "Partition"))
+				strcpy (type, strstr (szFileName, "Partition0") == NULL ? "partition" : "device");
+			else
+				strcpy (type, "device");
+
+			sprintf (szTmp, getstr (IDS_OVERWRITEPROMPT_DEVICE), type, szFileName, drive);
+
 			x = MessageBox (hwndDlg, szTmp, lpszTitle, YES_NO|MB_ICONWARNING|MB_DEFBUTTON2);
 			if (x != IDYES)
 				goto cancel;
@@ -460,18 +469,42 @@ formatThreadFunction (void *hwndDlg)
 			CloseHandle (DismountDrive (driveNo));
 		}
 
-		if (nCurrentOS == WIN_NT)
+		// If we are encrypting whole device, dismount all partitions located on it first
+		if (strstr (szFileName, "\\Partition0"))
 		{
-			nDosLinkCreated = FakeDosNameForDevice (szDiskFile, szDosDevice, szCFDevice, FALSE);
-			if (nDosLinkCreated != 0)
-			{
-				handleWin32Error (hwndDlg);
-				goto cancel;
+			int i, diskNo;
+			if (sscanf (szFileName, "\\Device\\Harddisk%d\\", &diskNo) == 1)
+			{	
+				for (i = 1; i < 32; i++)
+				{
+					sprintf ((char *)deviceName, "\\Device\\Harddisk%d\\Partition%d", diskNo, i);
+					ToUNICODE ((char *)deviceName);
+
+					driveNo = GetDiskDeviceDriveLetter (deviceName);
+
+					if (driveNo != -1)
+					{
+						if (quickFormat && i > 1)
+						{ 
+							// Quickformat prevents overwriting of existing filesystems and
+							// an eventual remount could corrupt the volume
+							MessageBox (hwndDlg, getstr (IDS_ERR_MOUNTED_FILESYSTEMS), lpszTitle, MB_ICONSTOP);
+							goto cancel;
+						}
+
+						// Handle to dismounted volumes intentionally left open till program exit
+						// to prevent remount during format
+						DismountDrive (driveNo); 
+					}
+				}
 			}
 		}
-		else
+
+		nDosLinkCreated = FakeDosNameForDevice (szDiskFile, szDosDevice, szCFDevice, FALSE);
+		if (nDosLinkCreated != 0)
 		{
-			strcpy (szCFDevice, szDiskFile);
+			handleWin32Error (hwndDlg);
+			goto cancel;
 		}
 	}
 
@@ -502,7 +535,7 @@ formatThreadFunction (void *hwndDlg)
 
 	dwWin32FormatError = GetLastError ();
 
-	if (bHiddenVolHost)
+	if (bHiddenVolHost && !bThreadCancel)
 	{
 		/* Auto mount the newly created hidden volume host */
 		switch (MountHiddenVolHost (hwndDlg, szDiskFile, &hiddenVolHostDriveNo, szPassword))
@@ -568,7 +601,7 @@ formatThreadFunction (void *hwndDlg)
 		{
 			/* We've just created an outer volume (to host a hidden volume within) */
 
-			MessageBeep (MB_OK);
+			MessageBeep (-1);
 			bHiddenVolHost = FALSE; 
 			bHiddenVolFinished = FALSE;
 			nHiddenVolHostSize = nVolumeSize;
@@ -595,7 +628,7 @@ cancel:
 	bThreadRunning = FALSE;
 	NormalCursor ();
 
-	if (bHiddenVolHost && hiddenVolHostDriveNo < -1)  // If hidden volume host could not be mounted
+	if (bHiddenVolHost && hiddenVolHostDriveNo < -1 && !bThreadCancel)	// If hidden volume host could not be mounted
 		AbortProcessSilent ();
 
 	_endthread ();
@@ -961,6 +994,7 @@ QueryFreeSpace (HWND hwndDlg, HWND hwndTextBox, BOOL display)
 		else
 		{
 			DISK_GEOMETRY driveInfo;
+			PARTITION_INFORMATION diskInfo;
 			DWORD dwResult;
 			int nStatus;
 			BOOL bResult;
@@ -969,16 +1003,12 @@ QueryFreeSpace (HWND hwndDlg, HWND hwndTextBox, BOOL display)
 			if (nStatus != 0)
 				handleWin32Error (hwndDlg);
 
-			bResult = DeviceIoControl (dev, IOCTL_DISK_GET_DRIVE_GEOMETRY, NULL, 0,
-			   &driveInfo, sizeof (driveInfo), &dwResult, NULL);
+			// Query partition size
+			bResult = DeviceIoControl (dev, IOCTL_DISK_GET_PARTITION_INFO, NULL, 0,
+				&diskInfo, sizeof (diskInfo), &dwResult, NULL);
 
-			if (driveInfo.MediaType == FixedMedia)
+			if (bResult == TRUE)
 			{
-				PARTITION_INFORMATION diskInfo;
-
-				bResult = DeviceIoControl (dev, IOCTL_DISK_GET_PARTITION_INFO, NULL, 0,
-							   &diskInfo, sizeof (diskInfo), &dwResult, NULL);
-
 				if (bResult == TRUE)
 				{
 					nVolumeSize = diskInfo.PartitionLength.QuadPart;
@@ -997,7 +1027,16 @@ QueryFreeSpace (HWND hwndDlg, HWND hwndTextBox, BOOL display)
 						return FALSE;
 					}
 				}
-				else
+			}
+			else
+			{
+				LARGE_INTEGER lDiskFree;
+
+				// Drive geometry info is used only when IOCTL_DISK_GET_PARTITION_INFO fails
+				bResult = DeviceIoControl (dev, IOCTL_DISK_GET_DRIVE_GEOMETRY, NULL, 0,
+					&driveInfo, sizeof (driveInfo), &dwResult, NULL);
+
+				if (!bResult)
 				{
 					if (display)
 						DisplaySizingErrorText (hwndTextBox);
@@ -1005,11 +1044,6 @@ QueryFreeSpace (HWND hwndDlg, HWND hwndTextBox, BOOL display)
 					CloseHandle (dev);
 					return FALSE;
 				}
-
-			}
-			else if (bResult == TRUE)
-			{
-				LARGE_INTEGER lDiskFree;
 
 				lDiskFree.QuadPart = driveInfo.Cylinders.QuadPart * driveInfo.BytesPerSector *
 				    driveInfo.SectorsPerTrack * driveInfo.TracksPerCylinder;
@@ -1020,14 +1054,6 @@ QueryFreeSpace (HWND hwndDlg, HWND hwndTextBox, BOOL display)
 					nMultiplier = PrintFreeSpace (hwndTextBox, szDiskFile, &lDiskFree);
 
 				nUIVolumeSize = lDiskFree.QuadPart / nMultiplier;
-			}
-			else
-			{
-				if (display)
-					DisplaySizingErrorText (hwndTextBox);
-
-				CloseHandle (dev);
-				return FALSE;
 			}
 
 			CloseHandle (dev);
@@ -1612,13 +1638,14 @@ The principle is that a TrueCrypt volume is created within another TrueCrypt vol
 (within the free space on the volume). Even when the outer volume is mounted, it is\n\
 impossible to tell whether there is a hidden volume within it or not, because free\n\
 space on any TrueCrypt volume is always filled with random data when the volume is\n\
-created and no part of the hidden volume can be distinguished from random data. The\n\
-password for the hidden volume must be different from the password for the outer\n\
-volume. To the outer volume (before creating the hidden volume within it) you should\n\
-copy some sensitive-looking files that you do NOT really want to hide. These files\n\
-will be there for anyone who would force you to hand over the password. You will\n\
-reveal only the password for the outer volume, not for the hidden one. Files that\n\
-are really sensitive will be stored on the hidden volume.\n\
+created (if Quick Format is disabled) and no part of the hidden volume can be\n\
+distinguished from random data. The password for the hidden volume must be different\n\
+from the password for the outer volume. To the outer volume (before creating the\n\
+hidden volume within it) you should copy some sensitive-looking files that you do\n\
+NOT really want to hide. These files will be there for anyone who would force you to\n\
+hand over the password. You will reveal only the password for the outer volume, not\n\
+for the hidden one. Files that are really sensitive will be stored on the hidden\n\
+volume.\n\
 \n\
 For more information, please refer to TrueCrypt User's Guide."
 				, lpszTitle, MB_OK);
@@ -1754,7 +1781,7 @@ For more information, please refer to TrueCrypt User's Guide."
 						      (DLGPROC) RawDevicesDlgProc, (LPARAM) & szFileName[0]);
 
 			// Check administrator privileges
-			if (!IsAdmin())
+			if (!strstr (szFileName, "Floppy") && !IsAdmin())
 				MessageBox (hwndDlg, getstr (IDS_ADMIN_PRIVILEGES_WARN_DEVICES), lpszTitle, MB_OK|MB_ICONWARNING);
 
 			if (nResult == IDOK)
@@ -1912,9 +1939,6 @@ MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		}
 		if (lw == IDCANCEL)
 		{
-			DWORD os_error;
-			int err;
-
 			if (hiddenVolHostDriveNo > -1)
 				UnmountVolume (hwndDlg, hiddenVolHostDriveNo, FALSE);
 
@@ -1928,9 +1952,10 @@ MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			{
 				if (IsButtonChecked (GetDlgItem (hCurPage, IDC_HIDDEN_VOL)) == TRUE)
 				{
-					if (!IsAdmin())
+					if (!IsAdmin()
+						&& IDNO == MessageBox (hwndDlg, getstr (IDS_ADMIN_PRIVILEGES_WARN_HIDVOL),
+							lpszTitle, MB_ICONWARNING|MB_YESNO|MB_DEFBUTTON2))
 					{
-						MessageBox (hwndDlg, getstr (IDS_ADMIN_PRIVILEGES_WARN_HIDVOL), lpszTitle, MB_ICONSTOP);
 						nCurPageNo--;
 					}
 					else
@@ -2150,6 +2175,20 @@ MainDialogProc (HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				clusterSize = SendMessage (GetDlgItem (hCurPage, IDC_CLUSTERSIZE), CB_GETITEMDATA
 					,SendMessage (GetDlgItem (hCurPage, IDC_CLUSTERSIZE), CB_GETCURSEL, 0, 0) , 0);
 
+				// Increase cluster size if it's too small for this volume size
+				if (fileSystem == FILESYS_FAT && clusterSize > 0)
+				{
+					BOOL fixed = FALSE;
+					while (clusterSize < 128 
+						&& nVolumeSize / clusterSize > 17179869184I64)
+					{
+						clusterSize *= 2;
+						fixed = TRUE;
+					}
+					if (fixed)
+						MessageBox (hwndDlg, "The selected cluster size is too small for this volume size.\nA greater cluster size will be used instead.", lpszTitle, MB_ICONWARNING);
+				}
+				
 				_beginthread (formatThreadFunction, 4096, hwndDlg);
 				return 1;
 			}
@@ -2373,10 +2412,7 @@ ExtractCommandLine (HWND hwndDlg, char *lpszCommandLine)
 int DetermineMaxHiddenVolSize (HWND hwndDlg)
 {
 	__int64 nbrFreeClusters = 0;
-	int nbrReserveBytes;
-	int reserveFactor;
-	int result, err;
-	DWORD os_error;
+	__int64 nbrReserveBytes;
 
 	ArrowWaitCursor ();
 
@@ -2445,8 +2481,7 @@ int AnalyzeHiddenVolumeHost (HWND hwndDlg, int *driveNo, int *realClusterSize)
 {
 	HANDLE hDevice;
 	DWORD bytesReturned;
-	DWORD os_error;
-	int result, err;
+	int result;
 	char lpFileName[7] = {'\\','\\','.','\\',*driveNo + 'A',':',0};
 	BYTE readBuffer[SECTOR_SIZE*2];
 	LARGE_INTEGER offset, offsetNew;
@@ -2505,7 +2540,7 @@ efs_error:
 
 efsf_error:
 	CloseVolumeExplorerWindows (hwndDlg, *driveNo);
-	Sleep (200);
+
 	if (UnmountVolume (hwndDlg, *driveNo, FALSE))
 		*driveNo = -1;
 
@@ -2516,8 +2551,7 @@ efsf_error:
 // Mounts a volume within which the user intends to create a hidden volume
 int MountHiddenVolHost (HWND hwndDlg, char *volumePath, int *driveNo, char *lpszPassword)
 {
-	DWORD os_error;
-	int err;
+	MountOptions mountOptions;
 
 	*driveNo = GetLastAvailableDrive ();
 
@@ -2527,7 +2561,10 @@ int MountHiddenVolHost (HWND hwndDlg, char *volumePath, int *driveNo, char *lpsz
 		return ERR_NO_FREE_DRIVES;
 	}
 
-	if (MountVolume (hwndDlg, *driveNo, volumePath, lpszPassword, FALSE, TRUE, FALSE) < 1)
+	mountOptions.ReadOnly = bHiddenVolDirect;
+	mountOptions.Removable = ReadRegistryInt ("MountVolumesRemovable", FALSE);
+
+	if (MountVolume (hwndDlg, *driveNo, volumePath, lpszPassword, FALSE, TRUE, &mountOptions, FALSE) < 1)
 	{
 		*driveNo = -3;
 		return ERR_VOL_MOUNT_FAILED;
@@ -2548,10 +2585,10 @@ int ScanVolClusterBitmap (HWND hwndDlg, int *driveNo, __int64 nbrClusters, __int
 
 	HANDLE hDevice;
 	DWORD lBytesReturned;
-	DWORD os_error;
-	int err, retVal;
+	int retVal;
 	BYTE rmnd;
 	char lpFileName[7] = {'\\','\\','.','\\', *driveNo + 'A', ':', 0};
+	int i;
 
 	DWORD bufLen;
 	__int64 bitmapCnt;
@@ -2565,23 +2602,28 @@ int ScanVolClusterBitmap (HWND hwndDlg, int *driveNo, __int64 nbrClusters, __int
 	}
 
 	CloseVolumeExplorerWindows (hwndDlg, *driveNo);
-	Sleep (200);
-
+	
+	i = 5;	// Auto-retry locking i times because on some systems the first lock attempt always fails for some reason. 
 	while (!DeviceIoControl(hDevice, FSCTL_LOCK_VOLUME, NULL, 0, NULL, 0, &lBytesReturned, NULL))
 	{
-		retVal = MessageBox (hwndDlg, "Error: Cannot lock the outer volume!\n\nVolume cannot be locked if it contains files or folders\nbeing used by an application or the system.\n\nPlease close any application that might be using files\nor directories on the volume and click Retry.\n\nWARNING: If you decide to ignore this, you must ensure\nthat after you click Ignore, no more data will be written\nto the volume until it is dismounted. Failure to do so may\nadversely affect plausible deniability of the hidden volume!", lpszTitle, MB_ABORTRETRYIGNORE | MB_DEFBUTTON2);
-		if (retVal == IDABORT)
+		if (i <= 0)
 		{
-			CloseHandle (hDevice);
-			return 0;
+			retVal = MessageBox (hwndDlg, "Error: Cannot lock the outer volume!\n\nVolume cannot be locked if it contains files or folders\nbeing used by an application or the system.\n\nPlease close any application that might be using files\nor directories on the volume and click Retry.\n\nWARNING: If you decide to ignore this, you must ensure\nthat after you click Ignore, no more data will be written\nto the volume until it is dismounted. Failure to do so may\nadversely affect plausible deniability of the hidden volume!", lpszTitle, MB_ABORTRETRYIGNORE | MB_DEFBUTTON2);
+			if (retVal == IDABORT)
+			{
+				CloseHandle (hDevice);
+				return 0;
+			}
+			else if (retVal == IDIGNORE) break;
 		}
-		else if (retVal == IDIGNORE)
+		else
 		{
-			break;
+			i--;
+			Sleep (UNMOUNT_AUTO_RETRY_DELAY);
 		}
 	}
 
- 	bufLen = nbrClusters / 8 + 2 * sizeof(LARGE_INTEGER);
+ 	bufLen = (DWORD) (nbrClusters / 8 + 2 * sizeof(LARGE_INTEGER));
 	bufLen += 100000 + bufLen/10;	// Add reserve
 
 	lpOutBuffer = malloc(bufLen);
@@ -2609,7 +2651,7 @@ int ScanVolClusterBitmap (HWND hwndDlg, int *driveNo, __int64 nbrClusters, __int
 		goto vcm_error;
 	}
 
-	rmnd = lpOutBuffer->BitmapSize.QuadPart % 8;
+	rmnd = (BYTE) (lpOutBuffer->BitmapSize.QuadPart % 8);
 
 	if ((rmnd != 0) 
 	&& ((lpOutBuffer->Buffer[lpOutBuffer->BitmapSize.QuadPart / 8] & ((1 << rmnd)-1) ) != 0))
@@ -2651,7 +2693,6 @@ vcm_error:
 
 vcmf_error:
 	CloseVolumeExplorerWindows (hwndDlg, *driveNo);
-	Sleep (200);
 
 	if (UnmountVolume (hwndDlg, *driveNo, FALSE))
 		*driveNo = -1;

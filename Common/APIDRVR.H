@@ -1,6 +1,6 @@
 /* The source code contained in this file has been derived from the source code
    of Encryption for the Masses 2.02a by Paul Le Roux. Modifications and
-   additions to that source code contained in this file are Copyright (c) 2004
+   additions to that source code contained in this file are Copyright (c) 2004-2005
    TrueCrypt Foundation and Copyright (c) 2004 TrueCrypt Team. Unmodified
    parts are Copyright (c) 1998-99 Paul Le Roux. This is a TrueCrypt Foundation
    release. Please see the file license.txt for full license details. */
@@ -63,6 +63,7 @@ etc... */
 #define CACHE_STATUS		466988	/* Get password cache status */
 #define VOLUME_PROPERTIES	466992	/* Get mounted volume properties */
 #define RESOLVE_SYMLINK		466996	/* Resolve symbolic link to target */
+#define DEVICE_REFCOUNT		467000	/* Return reference count of root device object */
 #define UNMOUNT_ALL			475112	/* Unmount all volumes */
 
 #define TC_FIRST_PRIVATE	MOUNT	/* First private control code */
@@ -115,6 +116,7 @@ typedef struct
 	int pkcs5;
 	int pkcs5Iterations;
 	BOOL hiddenVolume;
+	BOOL readOnly;
 	unsigned __int64 volumeCreationTime;
 	unsigned __int64 headerCreationTime;
 	//int readOnly;
@@ -174,7 +176,3 @@ typedef struct
 #define DOS_MOUNT_PREFIX DRIVER_STR("\\DosDevices\\")
 #define DOS_ROOT_PREFIX DRIVER_STR("\\DosDevices\\TrueCrypt")
 #define WIN32_ROOT_PREFIX DRIVER_STR("\\\\.\\TrueCrypt")
-
-/* Win9x only */
-
-#define WIN9X_DRIVER_NAME "\\\\.\\TRUCRYPT"

@@ -1,6 +1,6 @@
 /* The source code contained in this file has been derived from the source code
    of Encryption for the Masses 2.02a by Paul Le Roux. Modifications and
-   additions to that source code contained in this file are Copyright (c) 2004
+   additions to that source code contained in this file are Copyright (c) 2004-2005
    TrueCrypt Foundation and Copyright (c) 2004 TrueCrypt Team. Unmodified
    parts are Copyright (c) 1998-99 Paul Le Roux. This is a TrueCrypt Foundation
    release. Please see the file license.txt for full license details. */
@@ -15,7 +15,8 @@
 #include "apidrvr.h"
 #include "dlgcode.h"
 #include "resource.h"
-
+#include "common.h"
+#include "random.h"
 
 int
 FormatVolume (char *lpszFilename,
@@ -37,7 +38,6 @@ FormatVolume (char *lpszFilename,
 	int nStatus;
 	PCRYPTO_INFO cryptoInfo;
 	HANDLE dev = INVALID_HANDLE_VALUE;
-	OPEN_TEST_STRUCT driver;
 	DWORD dwError, dwThen, dwNow;
 	diskio_f write;
 	char header[SECTOR_SIZE];
@@ -103,6 +103,7 @@ FormatVolume (char *lpszFilename,
 
 	if (dev == INVALID_HANDLE_VALUE)
 	{
+		handleWin32Error (hwndDlg);
 		nStatus = ERR_OS_ERROR; goto error;
 	}
 
@@ -242,16 +243,18 @@ error:
 			{
 				// NTFS format is performed by system so we first need to mount the volume
 				int driveNo = GetLastAvailableDrive ();
-				DWORD os_error;
-				int err;
-
+				MountOptions mountOptions;
+				
 				if (driveNo == -1)
 				{
 					MessageBox (hwndDlg, "No free drive letter available. NTFS formatting cannot continue.", lpszTitle, ICON_HAND);
 					return ERR_NO_FREE_DRIVES;
 				}
 
-				if (MountVolume (hwndDlg, driveNo, volumePath, lpszPassword, FALSE, TRUE, FALSE) < 1)
+				mountOptions.ReadOnly = FALSE;
+				mountOptions.Removable = FALSE;
+
+				if (MountVolume (hwndDlg, driveNo, volumePath, lpszPassword, FALSE, TRUE, &mountOptions, FALSE) < 1)
 				{
 					MessageBox (hwndDlg, "Cannot mount volume. NTFS formatting cannot continue.", lpszTitle, ICON_HAND);
 					return ERR_VOL_MOUNT_FAILED;
