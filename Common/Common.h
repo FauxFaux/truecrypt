@@ -1,3 +1,11 @@
+/*
+ Copyright (c) TrueCrypt Foundation. All rights reserved.
+
+ Covered by the TrueCrypt License 2.3 the full text of which is contained
+ in the file License.txt included in TrueCrypt binary and source code
+ distribution packages.
+*/
+
 #ifndef COMMON_H
 #define COMMON_H
 
@@ -28,12 +36,6 @@ enum
 	HIDVOL_PROT_STATUS_ACTIVE,
 	HIDVOL_PROT_STATUS_ACTION_TAKEN			/* Active + action taken (write operation has already been denied) */
 };
-
-typedef struct
-{
-	int Length;
-	unsigned char Text[MAX_PASSWORD + 1];
-} Password;
 
 typedef struct
 {

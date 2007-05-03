@@ -1,3 +1,5 @@
+/* Deprecated/legacy */
+
 /* crypto/bf/bf_enc.c */
 /* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
@@ -56,8 +58,6 @@
  * [including the GNU Public Licence.]
  */
 
-
-#pragma warning( disable : 4131 )
 
 
 #include "Blowfish.h"

@@ -1,3 +1,5 @@
+/* Deprecated/legacy */
+
 /* crypto/des/des_enc.c */
 /* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
@@ -58,10 +60,8 @@
 
 /* Adapted for TrueCrypt by the TrueCrypt Foundation */
 
-#pragma warning( disable : 4131 )
-
 #include "Des_locl.h"
-#include "Endian.h"
+#include "Common/Endian.h"
 
 void des_encrypt(data, ks, enc)
 DES_LONG *data;
