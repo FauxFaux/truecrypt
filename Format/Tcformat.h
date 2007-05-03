@@ -1,13 +1,18 @@
-/* Legal Notice: The source code contained in this file has been derived from
-   the source code of Encryption for the Masses 2.02a, which is Copyright (c)
-   1998-99 Paul Le Roux and which is covered by the 'License Agreement for
-   Encryption for the Masses'. Modifications and additions to that source code
-   contained in this file are Copyright (c) 2004-2006 TrueCrypt Foundation and
-   Copyright (c) 2004 TrueCrypt Team, and are covered by TrueCrypt License 2.1
-   the full text of which is contained in the file License.txt included in
-   TrueCrypt binary and source code distribution archives.  */
+/*
+ Legal Notice: The source code contained in this file has been derived from
+ the source code of Encryption for the Masses 2.02a, which is Copyright (c)
+ Paul Le Roux and which is covered by the 'License Agreement for Encryption
+ for the Masses'. Modifications and additions to that source code contained
+ in this file are Copyright (c) TrueCrypt Foundation and are covered by the
+ TrueCrypt License 2.3 the full text of which is contained in the file
+ License.txt included in TrueCrypt binary and source code distribution
+ packages. */
 
-#include "../common/common.h"
+#include "Common/Common.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 void localcleanup ( void );
 void LoadSettings ( HWND hwndDlg );
@@ -17,7 +22,6 @@ void ComboSelChangeEA ( HWND hwndDlg );
 void VerifySizeAndUpdate ( HWND hwndDlg , BOOL bUpdate );
 void formatThreadFunction ( void *hwndDlg );
 void LoadPage ( HWND hwndDlg , int nPageNo );
-BOOL WINAPI VolstatsDlgProc ( HWND hwndDlg , UINT msg , WPARAM wParam , LPARAM lParam );
 int PrintFreeSpace ( HWND hwndTextBox , char *lpszDrive , PLARGE_INTEGER lDiskFree );
 void DisplaySizingErrorText ( HWND hwndTextBox );
 void EnableDisableFileNext ( HWND hComboBox , HWND hMainButton );
@@ -30,7 +34,18 @@ int DetermineMaxHiddenVolSize (HWND hwndDlg);
 BOOL IsSparseFile (HWND hwndDlg);
 BOOL GetFileVolSize (HWND hwndDlg, unsigned __int64 *size);
 int MountHiddenVolHost ( HWND hwndDlg, char *volumePath, int *driveNo, Password *password );
-int AnalyzeHiddenVolumeHost ( HWND hwndDlg, int *driveNo, int *realClusterSize);
+int AnalyzeHiddenVolumeHost (HWND hwndDlg, int *driveNo, __int64 hiddenVolHostSize, int *realClusterSize, __int64 *pnbrFreeClusters);
 int ScanVolClusterBitmap ( HWND hwndDlg, int *driveNo, __int64 nbrClusters, __int64 *nbrFreeClusters);
 int WINAPI WINMAIN ( HINSTANCE hInstance , HINSTANCE hPrevInstance , char *lpszCommandLine , int nCmdShow );
+	
+extern BOOL showKeys;
+extern HWND hDiskKey;
+extern HWND hHeaderKey;
+extern BOOL bHiddenVolHost;
+extern BOOL bHiddenVolDirect;
+extern BOOL bRemovableHostDevice;
+extern BOOL bWarnDeviceFormatAdvanced;
 
+#ifdef __cplusplus
+}
+#endif

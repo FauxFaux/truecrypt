@@ -1,3 +1,5 @@
+/* Deprecated/legacy */
+
 /* crypto/des/set_key.c */
 /* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
@@ -81,8 +83,6 @@ static int check_parity(des_cblock (*key));
 #else
 static int check_parity();
 #endif
-
-#pragma warning( disable : 4131 )
 
 int des_check_key=1;
 
@@ -256,7 +256,7 @@ des_key_schedule schedule;
 	return(0);
 	}
 
-int _cdecl des_key_sched(key, schedule)
+int des_key_sched(key, schedule)
 des_cblock (*key);
 des_key_schedule schedule;
 	{

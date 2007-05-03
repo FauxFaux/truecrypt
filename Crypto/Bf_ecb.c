@@ -1,3 +1,5 @@
+/* Deprecated/legacy */
+
 /* crypto/bf/bf_ecb.c */
 /* Copyright (C) 1995-1997 Eric Young (eay@cryptsoft.com)
  * All rights reserved.
@@ -60,9 +62,7 @@
 
 #include "Blowfish.h"
 #include "Bf_locl.h"
-#include "Endian.h"
-
-#pragma warning( disable : 4131 )
+#include "Common/Endian.h"
 
 /* Blowfish as implemented from 'Blowfish: Springer-Verlag paper'
  * (From LECTURE NOTES IN COIMPUTER SCIENCE 809, FAST SOFTWARE ENCRYPTION,

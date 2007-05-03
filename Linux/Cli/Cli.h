@@ -1,8 +1,9 @@
-/* 
-Copyright (c) 2004-2006 TrueCrypt Foundation. All rights reserved. 
+/*
+ Copyright (c) TrueCrypt Foundation. All rights reserved.
 
-Covered by TrueCrypt License 2.1 the full text of which is contained in the file
-License.txt included in TrueCrypt binary and source code distribution archives. 
+ Covered by the TrueCrypt License 2.3 the full text of which is contained
+ in the file License.txt included in TrueCrypt binary and source code
+ distribution packages.
 */
 
 #define TC_REQUIRED_MOUSE_EVENTS 5000
@@ -22,7 +23,7 @@ License.txt included in TrueCrypt binary and source code distribution archives.
 #define TC_MAX_PATH 260
 #define TC_MAX_PATH_STR "259"
 
-#define error(fmt, args...) fprintf (stderr, "truecrypt: " fmt, ## args)
+#define error(fmt, args...) IsTerminal ? fprintf (stderr, fmt, ## args) : fprintf (stderr, "truecrypt: " fmt, ## args)
 
 typedef struct
 {
@@ -36,13 +37,13 @@ typedef struct
 	BOOL Hidden;
 	unsigned long long ReadOnlyStart;
 	unsigned long long ReadOnlyEnd;
+	unsigned long long UserId;
 	unsigned long long ModTime;
 	unsigned long long AcTime;
 	int Flags;
 } MountListEntry;
 
-static BOOL CheckAdminPrivileges ();
-static void DropEffectiveUserId ();
+static BOOL CheckAdminPrivileges (int argc, char **argv);
 static BOOL LockMemory ();
 static BOOL WaitChild (BOOL quiet, char *execName);
 static BOOL Execute (BOOL quiet, char *execName, ...);
@@ -54,13 +55,14 @@ static BOOL UnloadKernelModule (BOOL quiet);
 static BOOL CheckKernelModuleVersion (BOOL wait, BOOL quiet);
 static void OpenMiceDevice ();
 static BOOL GetMountList (BOOL force);
+static BOOL IsMountPointAvailable (char *mountPoint);
 static BOOL IsVolumeMounted (char *volumePath);
 static int GetFreeMapDevice ();
 static BOOL DeleteLoopDevice (int loopDeviceNo);
 static int AskSelection (int defaultChoice, int min, int max);
 static BOOL AskYesNo (char *prompt, BOOL defaultNo);
 static char *AskString (char *prompt, char *buf, int maxSize);
-static void AskPassword (char *prompt, char *volumePath, Password *password);
+static void AskPassword (char *prompt, char *volumePath, Password *password, BOOL requireAscii);
 static char *AskVolumePath (char *volumePath, char *prompt);
 static BOOL AskKeyFiles (char *prompt, KeyFile **firstKeyFile);
 static BOOL OpenVolume (char *volumePath, char *prompt, char *promptArg, BOOL secondaryPassword, PCRYPTO_INFO *cryptoInfo, unsigned long long *startSector, unsigned long long *totalSectors, time_t *modTime, time_t *acTime);
@@ -84,5 +86,6 @@ static void DumpHelp ();
 static BOOL DumpMountList (int devNo);
 static BOOL DismountFileSystem (char *device);
 static BOOL DismountVolume (int devNo);
+static BOOL EnumMountPoints (char *device, char *mountPoint);
 static BOOL ToDeviceNumber (char *text, int *deviceNumber);
-
+static BOOL ValidatePassword (Password *password, BOOL requireAscii);
