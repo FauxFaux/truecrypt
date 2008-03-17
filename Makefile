@@ -7,9 +7,11 @@
 #
 
 #------ Command line arguments ------
-# DEBUG:		Disable optimizations, enable debug checks
+# DEBUG:		Disable optimizations and enable debug checks
 # DEBUGGER:		Enable debugging information for use by debuggers
-# NOSTRIP:		Do not strip release binaries
+# NOGUI:		Disable graphical user interface (build console-only application)
+# NOSTRIP:		Do not strip release binary
+# NOTEST:		Do not test release binary
 # VERBOSE:		Enable verbose messages
 
 #------ Targets ------
@@ -57,6 +59,12 @@ ifneq "$(origin VERBOSE)" "command line"
 MAKEFLAGS += -s
 endif
 
+ifeq "$(origin NOGUI)" "command line"
+export TC_NO_GUI := 1
+C_CXX_FLAGS += -DTC_NO_GUI
+WX_CONFIGURE_FLAGS += --disable-gui
+endif
+
 
 #------ Release configuration ------
 
@@ -102,8 +110,13 @@ PLATFORM := Linux
 C_CXX_FLAGS += -DTC_UNIX -DTC_LINUX
 
 ifeq "$(TC_BUILD_CONFIG)" "Release"
-C_CXX_FLAGS += -fdata-sections -ffunction-sections 
-LFLAGS += -Wl,--gc-sections -Wl,--hash-style=sysv
+C_CXX_FLAGS += -fdata-sections -ffunction-sections
+LFLAGS += -Wl,--gc-sections
+
+ifneq "$(shell ld --help 2>&1 | grep sysv | wc -l)" "0"
+LFLAGS += -Wl,--hash-style=sysv
+endif
+
 WXCONFIG_CFLAGS += -fdata-sections -ffunction-sections
 WXCONFIG_CXXFLAGS += -fdata-sections -ffunction-sections
 endif
@@ -120,17 +133,18 @@ APPNAME := TrueCrypt
 C_CXX_FLAGS += -DTC_UNIX -DTC_BSD -DTC_MACOSX
 
 ifeq "$(TC_BUILD_CONFIG)" "Release"
-C_CXX_FLAGS += -gfull
-LFLAGS += -Wl,-dead_strip
+
+SDK ?= /Developer/SDKs/MacOSX10.4u.sdk
+export DISABLE_PRECOMPILED_HEADERS := 1
+S := $(C_CXX_FLAGS)
+C_CXX_FLAGS = $(subst -MMD,,$(S))
+
+C_CXX_FLAGS += -gfull -arch i386 -arch ppc -isysroot $(SDK)
+LFLAGS += -Wl,-dead_strip -arch i386 -arch ppc -Wl,-syslibroot $(SDK)
+WX_CONFIGURE_FLAGS += --enable-universal_binary
 WXCONFIG_CFLAGS += -gfull
 WXCONFIG_CXXFLAGS += -gfull
-endif
 
-ifdef ARCH
-C_CXX_FLAGS += -arch $(ARCH) -isysroot $(SDK)
-LFLAGS += -arch $(ARCH) -Wl,-syslibroot $(SDK)
-WXCONFIG_CFLAGS += -arch $(ARCH) -isysroot $(SDK)
-WXCONFIG_CXXFLAGS += -arch $(ARCH) -isysroot $(SDK)
 endif
 
 endif
@@ -145,6 +159,8 @@ C_CXX_FLAGS += -DTC_UNIX -DTC_BSD -DTC_FREEBSD
 
 endif
 
+
+#------ Common configuration ------
 
 CFLAGS := $(C_CXX_FLAGS) $(CFLAGS) $(EXTRA_CFLAGS)
 CXXFLAGS := $(C_CXX_FLAGS) $(CXXFLAGS) $(EXTRA_CXXFLAGS)

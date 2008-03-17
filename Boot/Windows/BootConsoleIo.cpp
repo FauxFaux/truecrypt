@@ -28,7 +28,7 @@ void EnableScreenOutput ()
 
 void PrintChar (char c)
 {
-#ifdef TC_TRACING_ENABLED
+#ifdef TC_BOOT_TRACING_ENABLED
 	WriteDebugPort (c);
 #endif
 
@@ -198,6 +198,9 @@ byte GetShiftFlags ()
 
 byte GetKeyboardChar (byte *scanCode)
 {
+	// Work around a bug in the Apple BIOS
+	while (!IsKeyboardCharAvailable());
+
 	byte asciiCode;
 	byte scan;
 	__asm

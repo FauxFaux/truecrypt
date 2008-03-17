@@ -80,6 +80,7 @@
 			/>
 			<Tool
 				Name="VCManifestTool"
+				AdditionalManifestFiles="Format.manifest"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -168,6 +169,7 @@
 			/>
 			<Tool
 				Name="VCManifestTool"
+				AdditionalManifestFiles="Format.manifest"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -260,6 +262,22 @@
 				<File
 					RelativePath="..\Common\Dlgcode.c"
 					>
+					<FileConfiguration
+						Name="Debug|Win32"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+							CompileAs="2"
+						/>
+					</FileConfiguration>
+					<FileConfiguration
+						Name="Release|Win32"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+							CompileAs="2"
+						/>
+					</FileConfiguration>
 				</File>
 				<File
 					RelativePath="..\Common\Endian.c"

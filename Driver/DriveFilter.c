@@ -29,6 +29,10 @@ static BootArguments BootArgs;
 static BOOL BootDriveFound = FALSE;
 static DriveFilterExtension *BootDriveFilterExtension = NULL;
 static LARGE_INTEGER BootDriveLength;
+
+static BOOL HibernationDriverFilterActive = FALSE;
+static byte *HibernationWriteBuffer = NULL;
+static MDL *HibernationWriteBufferMdl = NULL;
 static uint32 HibernationPreventionCount = 0;
 
 static BootEncryptionSetupRequest SetupRequest;
@@ -241,6 +245,9 @@ static NTSTATUS MountDrive (DriveFilterExtension *Extension, Password *password,
 			Dump ("Failed to get drive length - error %x\n", status);
 			BootDriveLength.QuadPart = 0;
 		}
+
+		if (!HibernationDriverFilterActive)
+			StartHibernationDriverFilter();
 	}
 	else
 	{
@@ -385,18 +392,21 @@ static NTSTATUS DispatchPnp (PDEVICE_OBJECT DeviceObject, PIRP Irp, DriveFilterE
 
 
 	case IRP_MN_DEVICE_USAGE_NOTIFICATION:
-		Dump ("IRP_MN_DEVICE_USAGE_NOTIFICATION\n");
+		Dump ("IRP_MN_DEVICE_USAGE_NOTIFICATION type=%d\n", (int) irpSp->Parameters.UsageNotification.Type);
 
 		// Prevent creation of hibernation and crash dump files
 		if (irpSp->Parameters.UsageNotification.InPath
 			&& (irpSp->Parameters.UsageNotification.Type == DeviceUsageTypeDumpFile
-			 || irpSp->Parameters.UsageNotification.Type == DeviceUsageTypeHibernation))
+			|| (irpSp->Parameters.UsageNotification.Type == DeviceUsageTypeHibernation && !HibernationDriverFilterActive)))
 		{
 			IoReleaseRemoveLock (&Extension->Queue.RemoveLock, Irp);
-			++HibernationPreventionCount;
+
+			if (irpSp->Parameters.UsageNotification.Type == DeviceUsageTypeHibernation)
+				++HibernationPreventionCount;
+
 			return TCCompleteIrp (Irp, STATUS_UNSUCCESSFUL, Irp->IoStatus.Information);
 		}
-
+				
 		if (!DeviceObject->AttachedDevice || (DeviceObject->AttachedDevice->Flags & DO_POWER_PAGABLE))
 			DeviceObject->Flags |= DO_POWER_PAGABLE;
 
@@ -438,11 +448,26 @@ static NTSTATUS DispatchPnp (PDEVICE_OBJECT DeviceObject, PIRP Irp, DriveFilterE
 static NTSTATUS DispatchPower (PDEVICE_OBJECT DeviceObject, PIRP Irp, DriveFilterExtension *Extension, PIO_STACK_LOCATION irpSp)
 {
 	NTSTATUS status;
-	Dump ("IRP_MJ_POWER\n");
+	Dump ("IRP_MJ_POWER minor=%d type=%d shutdown=%d\n", (int) irpSp->MinorFunction, (int) irpSp->Parameters.Power.Type, (int) irpSp->Parameters.Power.ShutdownType);
 
-	if (irpSp->MinorFunction == IRP_MN_SET_POWER && DriverShuttingDown && Extension->DriveMounted)
+	if (SetupInProgress
+		&& irpSp->MinorFunction == IRP_MN_SET_POWER
+		&& irpSp->Parameters.Power.Type == DevicePowerState
+		&& irpSp->Parameters.Power.ShutdownType == PowerActionHibernate)
 	{
-		Dump ("IRP_MN_SET_POWER shutdown %d\n", irpSp->Parameters.Power.ShutdownType);
+		EncryptionSetupThreadAbortRequested = TRUE;
+		ObDereferenceObject (EncryptionSetupThread);
+		
+		while (SetupInProgress)
+			TCSleep (200);
+	}
+
+	if (DriverShuttingDown
+		&& Extension->DriveMounted
+		&& irpSp->MinorFunction == IRP_MN_SET_POWER
+		&& irpSp->Parameters.Power.Type == DevicePowerState)
+	{
+		Dump ("IRP_MN_SET_POWER\n");
 
 		if (Extension->QueueStarted && EncryptedIoQueueIsRunning (&Extension->Queue))
 			EncryptedIoQueueStop (&Extension->Queue);
@@ -570,9 +595,334 @@ wipe:
 }
 
 
+typedef NTSTATUS (*HiberDriverWriteFunctionA) (ULONG arg0, PLARGE_INTEGER writeOffset, PMDL dataMdl, PVOID arg3);
+typedef NTSTATUS (*HiberDriverWriteFunctionB) (PLARGE_INTEGER writeOffset, PMDL dataMdl);
+
+typedef struct
+{
+	// Until MS releases an API for filtering hibernation drivers, we have to resort to this.
+#ifdef _WIN64
+	byte FieldPad1[64];
+	HiberDriverWriteFunctionB WriteFunctionB;
+	byte FieldPad2[56];
+#else
+	byte FieldPad1[48];
+	HiberDriverWriteFunctionB WriteFunctionB;
+	byte FieldPad2[32];
+#endif
+	HiberDriverWriteFunctionA WriteFunctionA;
+	byte FieldPad3[24];
+	LARGE_INTEGER PartitionStartOffset;
+} HiberDriverContext;
+
+typedef NTSTATUS (*HiberDriverEntry) (PVOID arg0, HiberDriverContext *hiberDriverContext);
+
+typedef struct
+{
+	LIST_ENTRY ModuleList;
+#ifdef _WIN64
+	byte FieldPad1[32];
+#else
+	byte FieldPad1[16];
+#endif
+	PVOID ModuleBaseAddress;
+	HiberDriverEntry ModuleEntryAddress;
+#ifdef _WIN64
+	byte FieldPad2[24];
+#else
+	byte FieldPad2[12];
+#endif
+	UNICODE_STRING ModuleName;
+} ModuleTableItem;
+
+
+#define TC_MAX_HIBER_FILTER_COUNT 3
+static int LastHiberFilterNumber = 0;
+
+static HiberDriverEntry OriginalHiberDriverEntries[TC_MAX_HIBER_FILTER_COUNT];
+static HiberDriverWriteFunctionA OriginalHiberDriverWriteFunctionsA[TC_MAX_HIBER_FILTER_COUNT];
+static HiberDriverWriteFunctionB OriginalHiberDriverWriteFunctionsB[TC_MAX_HIBER_FILTER_COUNT];
+
+static LARGE_INTEGER HiberPartitionOffset;
+
+
+static NTSTATUS HiberDriverWriteFunctionFilter (int filterNumber, PLARGE_INTEGER writeOffset, PMDL dataMdl, BOOL writeB, ULONG atapiArg0, PVOID atapiArg3)
+{
+	MDL *encryptedDataMdl = dataMdl;
+
+	if (writeOffset && dataMdl && BootDriveFilterExtension && BootDriveFilterExtension->DriveMounted)
+	{
+		ULONG dataLength = MmGetMdlByteCount (dataMdl);
+
+		if (dataMdl->MappedSystemVa && dataLength > 0)
+		{
+			uint64 offset = HiberPartitionOffset.QuadPart + writeOffset->QuadPart;
+			uint64 intersectStart;
+			uint32 intersectLength;
+
+			if (dataLength > TC_HIBERNATION_WRITE_BUFFER_SIZE)
+				TC_BUG_CHECK (STATUS_BUFFER_OVERFLOW);
+
+			if ((dataLength & (ENCRYPTION_DATA_UNIT_SIZE - 1)) != 0)
+				TC_BUG_CHECK (STATUS_INVALID_PARAMETER);
+
+			if ((offset & (ENCRYPTION_DATA_UNIT_SIZE - 1)) != 0)
+				TC_BUG_CHECK (STATUS_INVALID_PARAMETER);
+
+			GetIntersection (offset,
+				dataLength,
+				BootDriveFilterExtension->Queue.EncryptedAreaStart,
+				BootDriveFilterExtension->Queue.EncryptedAreaEnd,
+				&intersectStart,
+				&intersectLength);
+
+			if (intersectLength > 0)
+			{
+				UINT64_STRUCT dataUnit;
+				dataUnit.Value = intersectStart / ENCRYPTION_DATA_UNIT_SIZE;
+
+				memcpy (HibernationWriteBuffer, dataMdl->MappedSystemVa, dataLength);
+
+				EncryptDataUnits (HibernationWriteBuffer + (intersectStart - offset),
+					&dataUnit,
+					intersectLength / ENCRYPTION_DATA_UNIT_SIZE,
+					BootDriveFilterExtension->Queue.CryptoInfo);
+
+				encryptedDataMdl = HibernationWriteBufferMdl;
+				MmInitializeMdl (encryptedDataMdl, HibernationWriteBuffer, dataLength);
+				encryptedDataMdl->MdlFlags = dataMdl->MdlFlags;
+			}
+		}
+	}
+
+	if (writeB)
+		return (*OriginalHiberDriverWriteFunctionsB[filterNumber]) (writeOffset, encryptedDataMdl);
+	
+	return (*OriginalHiberDriverWriteFunctionsA[filterNumber]) (atapiArg0, writeOffset, encryptedDataMdl, atapiArg3);
+}
+
+
+static NTSTATUS HiberDriverWriteFunctionAFilter0 (ULONG arg0, PLARGE_INTEGER writeOffset, PMDL dataMdl, PVOID arg3)
+{
+	return HiberDriverWriteFunctionFilter (0, writeOffset, dataMdl, FALSE, arg0, arg3);
+}
+
+static NTSTATUS HiberDriverWriteFunctionAFilter1 (ULONG arg0, PLARGE_INTEGER writeOffset, PMDL dataMdl, PVOID arg3)
+{
+	return HiberDriverWriteFunctionFilter (1, writeOffset, dataMdl, FALSE, arg0, arg3);
+}
+
+static NTSTATUS HiberDriverWriteFunctionAFilter2 (ULONG arg0, PLARGE_INTEGER writeOffset, PMDL dataMdl, PVOID arg3)
+{
+	return HiberDriverWriteFunctionFilter (2, writeOffset, dataMdl, FALSE, arg0, arg3);
+}
+
+
+static NTSTATUS HiberDriverWriteFunctionBFilter0 (PLARGE_INTEGER writeOffset, PMDL dataMdl)
+{
+	return HiberDriverWriteFunctionFilter (0, writeOffset, dataMdl, TRUE, 0, NULL);
+}
+
+static NTSTATUS HiberDriverWriteFunctionBFilter1 (PLARGE_INTEGER writeOffset, PMDL dataMdl)
+{
+	return HiberDriverWriteFunctionFilter (1, writeOffset, dataMdl, TRUE, 0, NULL);
+}
+
+static NTSTATUS HiberDriverWriteFunctionBFilter2 (PLARGE_INTEGER writeOffset, PMDL dataMdl)
+{
+	return HiberDriverWriteFunctionFilter (2, writeOffset, dataMdl, TRUE, 0, NULL);
+}
+
+
+static NTSTATUS HiberDriverEntryFilter (int filterNumber, PVOID arg0, HiberDriverContext *hiberDriverContext)
+{
+	BOOL filterInstalled = FALSE;
+	NTSTATUS status;
+
+	if (!OriginalHiberDriverEntries[filterNumber])
+		return STATUS_UNSUCCESSFUL;
+
+	status = (*OriginalHiberDriverEntries[filterNumber]) (arg0, hiberDriverContext);
+
+	if (!NT_SUCCESS (status) || !hiberDriverContext)
+		return status;
+
+	if (SetupInProgress)
+		TC_BUG_CHECK (STATUS_INVALID_PARAMETER);
+
+	if (hiberDriverContext->WriteFunctionA)
+	{
+		Dump ("Filtering WriteFunctionA %d\n", filterNumber);
+		OriginalHiberDriverWriteFunctionsA[filterNumber] = hiberDriverContext->WriteFunctionA;
+
+		switch (filterNumber)
+		{
+		case 0: hiberDriverContext->WriteFunctionA = HiberDriverWriteFunctionAFilter0; break;
+		case 1: hiberDriverContext->WriteFunctionA = HiberDriverWriteFunctionAFilter1; break;
+		case 2: hiberDriverContext->WriteFunctionA = HiberDriverWriteFunctionAFilter2; break;
+		default: TC_THROW_FATAL_EXCEPTION;
+		}
+
+		filterInstalled = TRUE;
+	}
+
+	if (hiberDriverContext->WriteFunctionB)
+	{
+		Dump ("Filtering WriteFunctionB %d\n", filterNumber);
+		OriginalHiberDriverWriteFunctionsB[filterNumber] = hiberDriverContext->WriteFunctionB;
+
+		switch (filterNumber)
+		{
+		case 0: hiberDriverContext->WriteFunctionB = HiberDriverWriteFunctionBFilter0; break;
+		case 1: hiberDriverContext->WriteFunctionB = HiberDriverWriteFunctionBFilter1; break;
+		case 2: hiberDriverContext->WriteFunctionB = HiberDriverWriteFunctionBFilter2; break;
+		default: TC_THROW_FATAL_EXCEPTION;
+		}
+
+		filterInstalled = TRUE;
+	}
+
+	if (filterInstalled && hiberDriverContext->PartitionStartOffset.QuadPart != 0)
+	{
+		HiberPartitionOffset = hiberDriverContext->PartitionStartOffset;
+	}
+
+	return STATUS_SUCCESS;
+}
+
+
+static NTSTATUS HiberDriverEntryFilter0 (PVOID arg0, HiberDriverContext *hiberDriverContext)
+{
+	return HiberDriverEntryFilter (0, arg0, hiberDriverContext);
+}
+
+
+static NTSTATUS HiberDriverEntryFilter1 (PVOID arg0, HiberDriverContext *hiberDriverContext)
+{
+	return HiberDriverEntryFilter (1, arg0, hiberDriverContext);
+}
+
+
+static NTSTATUS HiberDriverEntryFilter2 (PVOID arg0, HiberDriverContext *hiberDriverContext)
+{
+	return HiberDriverEntryFilter (2, arg0, hiberDriverContext);
+}
+
+
+static VOID LoadImageNotifyRoutine (PUNICODE_STRING fullImageName, HANDLE processId, PIMAGE_INFO imageInfo)
+{
+	ModuleTableItem *moduleItem;
+	LIST_ENTRY *listEntry;
+	KIRQL origIrql;
+
+	if (!imageInfo || !imageInfo->SystemModeImage || !imageInfo->ImageBase || !TCDriverObject->DriverSection)
+		return;
+
+	moduleItem = *(ModuleTableItem **) TCDriverObject->DriverSection;
+	if (!moduleItem || !moduleItem->ModuleList.Flink)
+		return;
+
+	// Search loaded system modules for hibernation driver
+	origIrql = KeRaiseIrqlToDpcLevel();
+
+	for (listEntry = moduleItem->ModuleList.Flink->Blink;
+		listEntry && listEntry != TCDriverObject->DriverSection;
+		listEntry = listEntry->Flink)
+	{
+		moduleItem = CONTAINING_RECORD (listEntry, ModuleTableItem, ModuleList);
+
+		if (moduleItem && imageInfo->ImageBase == moduleItem->ModuleBaseAddress)
+		{
+			if (moduleItem->ModuleName.Buffer && moduleItem->ModuleName.Length > 6)
+			{
+				// Skip MS BitLocker filter
+				if (moduleItem->ModuleName.Length >= 13 && memcmp (moduleItem->ModuleName.Buffer, L"hiber_dumpfve", 13) == 0)
+					break;
+
+				if (memcmp (moduleItem->ModuleName.Buffer, L"hiber_", 6) == 0
+					|| memcmp (moduleItem->ModuleName.Buffer, L"Hiber_", 6) == 0
+					|| memcmp (moduleItem->ModuleName.Buffer, L"HIBER_", 6) == 0)
+				{
+					HiberDriverEntry filterEntry;
+
+					switch (LastHiberFilterNumber)
+					{
+					case 0: filterEntry = HiberDriverEntryFilter0; break;
+					case 1: filterEntry = HiberDriverEntryFilter1; break;
+					case 2: filterEntry = HiberDriverEntryFilter2; break;
+					default: TC_THROW_FATAL_EXCEPTION;
+					}
+
+					if (moduleItem->ModuleEntryAddress != filterEntry)
+					{
+						// Install filter
+						OriginalHiberDriverEntries[LastHiberFilterNumber] = moduleItem->ModuleEntryAddress;
+						moduleItem->ModuleEntryAddress = filterEntry;
+
+						if (++LastHiberFilterNumber > TC_MAX_HIBER_FILTER_COUNT - 1)
+							LastHiberFilterNumber = 0;
+					}
+				}
+			}
+			break;
+		}
+	}
+
+	KeLowerIrql (origIrql);
+}
+
+
+void StartHibernationDriverFilter ()
+{
+	PHYSICAL_ADDRESS highestAcceptableWriteBufferAddr;
+	NTSTATUS status;
+
+	if (!TCDriverObject->DriverSection || !*(ModuleTableItem **) TCDriverObject->DriverSection)
+		goto err;
+	
+	// All buffers required for hibernation must be allocated here
+#ifdef _WIN64
+	highestAcceptableWriteBufferAddr.QuadPart = 0x7FFffffFFFFULL;
+#else
+	highestAcceptableWriteBufferAddr.QuadPart = 0xffffFFFFULL;
+#endif
+
+	HibernationWriteBuffer = MmAllocateContiguousMemory (TC_HIBERNATION_WRITE_BUFFER_SIZE, highestAcceptableWriteBufferAddr);
+	if (!HibernationWriteBuffer)
+		goto err;
+
+	HibernationWriteBufferMdl = IoAllocateMdl (HibernationWriteBuffer, TC_HIBERNATION_WRITE_BUFFER_SIZE, FALSE, FALSE, NULL);
+	if (!HibernationWriteBufferMdl)
+		goto err;
+
+	MmBuildMdlForNonPagedPool (HibernationWriteBufferMdl);
+
+	status = PsSetLoadImageNotifyRoutine (LoadImageNotifyRoutine);
+	if (!NT_SUCCESS (status))
+		goto err;
+
+	HibernationDriverFilterActive = TRUE;
+	return;
+
+err:
+	HibernationDriverFilterActive = FALSE;
+	
+	if (HibernationWriteBufferMdl)
+	{
+		IoFreeMdl (HibernationWriteBufferMdl);
+		HibernationWriteBufferMdl = NULL;
+	}
+
+	if (HibernationWriteBuffer)
+	{
+		MmFreeContiguousMemory (HibernationWriteBuffer);
+		HibernationWriteBuffer = NULL;
+	}
+}
+
+
 static VOID SetupThreadProc (PVOID threadArg)
 {
-	PDEVICE_OBJECT DeviceObject = threadArg;
 	DriveFilterExtension *Extension = BootDriveFilterExtension;
 
 	LARGE_INTEGER offset;
@@ -830,15 +1180,6 @@ ret:
 }
 
 
-static BOOL UserCanAccessDriveDevice ()
-{
-	UNICODE_STRING name;
-	RtlInitUnicodeString (&name, L"\\Device\\HarddiskVolume1");
-
-	return IsAccessibleByUser (&name, FALSE);
-}
-
-
 NTSTATUS StartBootEncryptionSetup (PDEVICE_OBJECT DeviceObject, PIRP irp, PIO_STACK_LOCATION irpSp)
 {
 	NTSTATUS status;
@@ -974,6 +1315,32 @@ void GetBootLoaderVersion (PIRP irp, PIO_STACK_LOCATION irpSp)
 		{
 			*(uint16 *) irp->AssociatedIrp.SystemBuffer = BootArgs.BootLoaderVersion;
 			irp->IoStatus.Information = sizeof (uint16);
+			irp->IoStatus.Status = STATUS_SUCCESS;
+		}
+		else
+		{
+			irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+			irp->IoStatus.Information = 0;
+		}
+	}
+}
+
+
+void GetBootEncryptionAlgorithmName (PIRP irp, PIO_STACK_LOCATION irpSp)
+{
+	if (irpSp->Parameters.DeviceIoControl.OutputBufferLength < sizeof (GetBootEncryptionAlgorithmNameRequest))
+	{
+		irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
+		irp->IoStatus.Information = 0;
+	}
+	else
+	{
+		if (BootDriveFilterExtension && BootDriveFilterExtension->DriveMounted)
+		{
+			GetBootEncryptionAlgorithmNameRequest *request = (GetBootEncryptionAlgorithmNameRequest *) irp->AssociatedIrp.SystemBuffer;
+			EAGetName (request->BootEncryptionAlgorithmName, BootDriveFilterExtension->Queue.CryptoInfo->ea);
+
+			irp->IoStatus.Information = sizeof (GetBootEncryptionAlgorithmNameRequest);
 			irp->IoStatus.Status = STATUS_SUCCESS;
 		}
 		else
