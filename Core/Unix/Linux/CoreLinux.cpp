@@ -1,7 +1,7 @@
 /*
  Copyright (c) 2008 TrueCrypt Foundation. All rights reserved.
 
- Governed by the TrueCrypt License 2.5 the full text of which is contained
+ Governed by the TrueCrypt License 2.6 the full text of which is contained
  in the file License.txt included in TrueCrypt binary and source code
  distribution packages.
 */
@@ -12,10 +12,11 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/mount.h>
-#include <sys/utsname.h>
 #include <sys/wait.h>
 #include "CoreLinux.h"
+#include "Platform/SystemInfo.h"
 #include "Platform/TextReader.h"
+#include "Volume/EncryptionModeLRW.h"
 #include "Volume/EncryptionModeXTS.h"
 #include "Driver/Fuse/FuseService.h"
 #include "Core/Unix/CoreServiceProxy.h"
@@ -30,7 +31,7 @@ namespace TrueCrypt
 	{
 	}
 
-	DevicePath CoreLinux::AttachFileToLoopDevice (const FilePath &filePath) const
+	DevicePath CoreLinux::AttachFileToLoopDevice (const FilePath &filePath, bool readOnly) const
 	{
 		list <string> loopPaths;
 		loopPaths.push_back ("/dev/loop");
@@ -51,6 +52,14 @@ namespace TrueCrypt
 				continue;
 
 			list <string> args;
+
+			list <string>::iterator readOnlyArg;
+			if (readOnly)
+			{
+				args.push_back ("-r");
+				readOnlyArg = --args.end();
+			}
+
 			args.push_back ("--");
 			args.push_back (loopDev);
 			args.push_back (filePath);
@@ -60,7 +69,19 @@ namespace TrueCrypt
 				Process::Execute ("losetup", args);
 				return loopDev;
 			}
-			catch (ExecutedProcessFailed&) { }
+			catch (ExecutedProcessFailed&)
+			{
+				if (readOnly)
+				{
+					try
+					{
+						args.erase (readOnlyArg);
+						Process::Execute ("losetup", args);
+						return loopDev;
+					}
+					catch (ExecutedProcessFailed&) { }
+				}
+			}
 		}
 
 		throw NoLoopbackDeviceAvailable (SRC_POS);
@@ -120,6 +141,7 @@ namespace TrueCrypt
 			
 			if (fields.size() != 4
 				|| fields[3].find ("loop") != string::npos	// skip loop devices
+				|| fields[3].find ("ram") != string::npos	// skip RAM devices
 				|| fields[2] == "1"							// skip extended partitions
 				)
 				continue;
@@ -201,6 +223,9 @@ namespace TrueCrypt
 			if (entry->mnt_dir)
 				mf->MountPoint = DirectoryPath (entry->mnt_dir);
 
+			if (entry->mnt_type)
+				mf->Type = entry->mnt_type;
+
 			if ((devicePath.IsEmpty() || devicePath == mf->Device) && (mountPoint.IsEmpty() || mountPoint == mf->MountPoint))
 				mountedFilesystems.push_back (mf);
 		}
@@ -225,32 +250,35 @@ namespace TrueCrypt
 
 	void CoreLinux::MountVolumeNative (shared_ptr <Volume> volume, MountOptions &options, const DirectoryPath &auxMountPoint) const
 	{
+		bool xts = (typeid (*volume->GetEncryptionMode()) == typeid (EncryptionModeXTS));
+		bool lrw = (typeid (*volume->GetEncryptionMode()) == typeid (EncryptionModeLRW));
+
 		if (options.NoKernelCrypto
-			|| typeid (*volume->GetEncryptionMode()) != typeid (EncryptionModeXTS)
+			|| (!xts && (!lrw || volume->GetEncryptionAlgorithm()->GetCiphers().size() > 1 || volume->GetEncryptionAlgorithm()->GetMinBlockSize() != 16))
 			|| volume->GetProtectionType() == VolumeProtection::HiddenVolumeReadOnly)
 		{
 			throw NotApplicable (SRC_POS);
 		}
 
-		utsname unameData;
-		if (uname (&unameData) != -1)
-		{
-			vector <string> osVersion = StringConverter::Split (unameData.release, ".-");
-			if (osVersion.size() >= 3
-				&& osVersion[0] == "2" && osVersion[1] == "6" && StringConverter::ToUInt32 (osVersion[2]) < 24)
-			{
-				throw NotApplicable (SRC_POS);
-			}
-		}
+		vector <int> osVersion = SystemInfo::GetVersion();
+
+		if (osVersion.size() >= 3 && osVersion[0] == 2 && osVersion[1] == 6 && osVersion[2] < (xts ? 24 : 20))
+			throw NotApplicable (SRC_POS);
 
 		// Load device mapper kernel module
 		list <string> execArgs;
-		execArgs.push_back ("dm_mod");
-		try
+		foreach (const string &dmModule, StringConverter::Split ("dm_mod dm-mod dm"))
 		{
-			Process::Execute ("modprobe", execArgs);
+			execArgs.clear();
+			execArgs.push_back (dmModule);
+
+			try
+			{
+				Process::Execute ("modprobe", execArgs);
+				break;
+			}
+			catch (...) { }
 		}
-		catch (...) { }
 
 		bool loopDevAttached = false;
 		bool nativeDevCreated = false;
@@ -260,7 +288,7 @@ namespace TrueCrypt
 		VolumePath volumePath = volume->GetPath();
 		if (!volumePath.IsDevice() || (options.Path->IsDevice() && volume->GetFile()->GetDeviceSectorSize() != ENCRYPTION_DATA_UNIT_SIZE))
 		{
-			volumePath = AttachFileToLoopDevice (volumePath);
+			volumePath = AttachFileToLoopDevice (volumePath, options.Protection == VolumeProtection::ReadOnly);
 			loopDevAttached = true;
 		}
 
@@ -278,14 +306,16 @@ namespace TrueCrypt
 				stringstream dmCreateArgs;
 				dmCreateArgs << "0 " << volume->GetSize() / ENCRYPTION_DATA_UNIT_SIZE << " crypt ";
 
-				dmCreateArgs << StringConverter::ToLower (StringConverter::ToSingle (cipher.GetName())) << "-xts-plain ";
+				// Mode
+				dmCreateArgs << StringConverter::ToLower (StringConverter::ToSingle (cipher.GetName())) << (xts ? "-xts-plain " : "-lrw-benbi ");
 
 				size_t keyArgOffset = dmCreateArgs.str().size();
-				dmCreateArgs << setw (cipher.GetKeySize() * 4) << 0 << setw (0);
+				dmCreateArgs << setw (cipher.GetKeySize() * (xts ? 4 : 2) + (xts ? 0 : 16 * 2)) << 0 << setw (0);
 
+				// Sector and data unit offset
 				uint64 startSector = volume->GetLayout()->GetDataOffset (volume->GetHostSize()) / ENCRYPTION_DATA_UNIT_SIZE;
 
-				dmCreateArgs << ' ' << startSector << ' ';
+				dmCreateArgs << ' ' << (xts ? startSector + volume->GetEncryptionMode()->GetSectorOffset() : 0) << ' ';
 				if (nativeDevCount == 0)
 					dmCreateArgs << string (volumePath) << ' ' << startSector;
 				else
@@ -294,15 +324,19 @@ namespace TrueCrypt
 				SecureBuffer dmCreateArgsBuf (dmCreateArgs.str().size());
 				dmCreateArgsBuf.CopyFrom (ConstBufferPtr ((byte *) dmCreateArgs.str().c_str(), dmCreateArgs.str().size()));
 
+				// Keys
 				const SecureBuffer &cipherKey = cipher.GetKey();
 				secondaryKeyOffset -= cipherKey.Size();
-				ConstBufferPtr secondaryKey = volume->GetEncryptionMode()->GetKey().GetRange (secondaryKeyOffset, cipherKey.Size());
+				ConstBufferPtr secondaryKey = volume->GetEncryptionMode()->GetKey().GetRange (xts ? secondaryKeyOffset : 0, xts ? cipherKey.Size() : 16);
 
 				SecureBuffer hexStr (3);
 				for (size_t i = 0; i < cipherKey.Size(); ++i)
 				{
 					sprintf ((char *) hexStr.Ptr(), "%02x", (int) cipherKey[i]);
 					dmCreateArgsBuf.GetRange (keyArgOffset + i * 2, 2).CopyFrom (hexStr.GetRange (0, 2));
+
+					if (lrw && i >= 16)
+						continue;
 
 					sprintf ((char *) hexStr.Ptr(), "%02x", (int) secondaryKey[i]);
 					dmCreateArgsBuf.GetRange (keyArgOffset + cipherKey.Size() * 2 + i * 2, 2).CopyFrom (hexStr.GetRange (0, 2));
@@ -314,7 +348,7 @@ namespace TrueCrypt
 				if (nativeDevCount != cipherCount - 1)
 					nativeDevName << "_" << cipherCount - nativeDevCount - 2;
 				
-				nativeDevPath = string ("/dev/mapper/") + nativeDevName.str();
+				nativeDevPath = "/dev/mapper/" + nativeDevName.str();
 
 				execArgs.clear();
 				execArgs.push_back ("create");
@@ -322,6 +356,23 @@ namespace TrueCrypt
 
 				Process::Execute ("dmsetup", execArgs, -1, nullptr, &dmCreateArgsBuf);
 				
+				// Wait for the device to be created
+				for (int t = 0; true; t++)
+				{
+					try
+					{
+						FilesystemPath (nativeDevPath).GetType();
+						break;
+					}
+					catch (...)
+					{
+						if (t > 20)
+							throw;
+
+						Thread::Sleep (100);
+					}
+				}
+
 				nativeDevCreated = true;
 				++nativeDevCount;
 			}

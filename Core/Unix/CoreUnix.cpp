@@ -1,7 +1,7 @@
 /*
  Copyright (c) 2008 TrueCrypt Foundation. All rights reserved.
 
- Governed by the TrueCrypt License 2.5 the full text of which is contained
+ Governed by the TrueCrypt License 2.6 the full text of which is contained
  in the file License.txt included in TrueCrypt binary and source code
  distribution packages.
 */
@@ -63,6 +63,10 @@ namespace TrueCrypt
 	{
 		list <string> args;
 
+#ifdef TC_MACOSX
+		if (force)
+			args.push_back ("-f");
+#endif
 		args.push_back ("--");
 		args.push_back (mountPoint);
 
@@ -133,6 +137,48 @@ namespace TrueCrypt
 		VolumeDismountedEvent.Raise (eventArgs);
 
 		return mountedVolume;
+	}
+
+	bool CoreUnix::FilesystemSupportsLargeFiles (const FilePath &filePath) const
+	{
+		string path = filePath;
+		size_t pos;
+		
+		while ((pos = path.find_last_of ('/')) != string::npos)
+		{
+			path = path.substr (0, pos);
+
+			if (path.empty())
+				break;
+
+			try
+			{
+				MountedFilesystemList filesystems = GetMountedFilesystems (DevicePath(), path);
+				if (!filesystems.empty())
+				{
+					const MountedFilesystem &fs = *filesystems.front();
+
+					if (fs.Type == "fat"
+						|| fs.Type == "fat32"
+						|| fs.Type == "vfat"
+						|| fs.Type == "fatfs"
+						|| fs.Type == "msdos"
+						|| fs.Type == "msdosfs"
+						|| fs.Type == "umsdos"
+						|| fs.Type == "dos"
+						|| fs.Type == "dosfs"
+						)
+					{
+						return false;
+					}
+
+					return true;
+				}
+			}
+			catch (...) { }
+		}
+
+		return true;	// Prevent errors if the filesystem cannot be identified
 	}
 
 	string CoreUnix::GetDefaultMountPointPrefix () const
@@ -334,12 +380,16 @@ namespace TrueCrypt
 					options.ProtectionKeyfiles,
 					options.SharedAccessAllowed,
 					VolumeType::Unknown,
-					options.UseBackupHeaders
+					options.UseBackupHeaders,
+					options.PartitionInSystemEncryptionScope
 					);
+
+				options.Password.reset();
 			}
 			catch (SystemException &e)
 			{
-				if (e.GetErrorCode() == EROFS && options.Protection != VolumeProtection::ReadOnly)
+				if (options.Protection != VolumeProtection::ReadOnly
+					&& (e.GetErrorCode() == EROFS || e.GetErrorCode() == EACCES || e.GetErrorCode() == EPERM))
 				{
 					// Read-only filesystem
 					options.Protection = VolumeProtection::ReadOnly;
@@ -415,6 +465,7 @@ namespace TrueCrypt
 			{
 				mountPoint = *options.MountPoint;
 
+#ifndef TC_MACOSX
 				if (mountPoint.find (GetDefaultMountPointPrefix()) == 0 && !options.MountPoint->IsDirectory())
 				{
 					Directory::Create (*options.MountPoint);
@@ -425,6 +476,7 @@ namespace TrueCrypt
 
 					mountDirCreated = true;
 				}
+#endif
 			}
 
 			try
@@ -433,7 +485,7 @@ namespace TrueCrypt
 				{
 					MountVolumeNative (volume, options, fuseMountPoint);
 				}
-				catch (...)
+				catch (NotApplicable&)
 				{
 					MountAuxVolumeImage (fuseMountPoint, options);
 				}
@@ -472,7 +524,7 @@ namespace TrueCrypt
 
 	void CoreUnix::MountAuxVolumeImage (const DirectoryPath &auxMountPoint, const MountOptions &options) const
 	{
-		DevicePath loopDev = AttachFileToLoopDevice (string (auxMountPoint) + FuseService::GetVolumeImagePath());
+		DevicePath loopDev = AttachFileToLoopDevice (string (auxMountPoint) + FuseService::GetVolumeImagePath(), options.Protection == VolumeProtection::ReadOnly);
 
 		try
 		{
