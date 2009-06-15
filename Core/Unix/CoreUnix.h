@@ -1,7 +1,7 @@
 /*
- Copyright (c) 2008 TrueCrypt Foundation. All rights reserved.
+ Copyright (c) 2008-2009 TrueCrypt Foundation. All rights reserved.
 
- Governed by the TrueCrypt License 2.6 the full text of which is contained
+ Governed by the TrueCrypt License 2.7 the full text of which is contained
  in the file License.txt included in TrueCrypt binary and source code
  distribution packages.
 */
@@ -48,6 +48,7 @@ namespace TrueCrypt
 		virtual DevicePath AttachFileToLoopDevice (const FilePath &filePath, bool readOnly) const { throw NotApplicable (SRC_POS); }
 		virtual void DetachLoopDevice (const DevicePath &devicePath) const { throw NotApplicable (SRC_POS); }
 		virtual void DismountNativeVolume (shared_ptr <VolumeInfo> mountedVolume) const { throw NotApplicable (SRC_POS); }
+		virtual bool FilesystemSupportsUnixPermissions (const DevicePath &devicePath) const;
 		virtual string GetDefaultMountPointPrefix () const;
 		virtual string GetFuseMountDirPrefix () const { return ".truecrypt_aux_mnt"; }
 		virtual MountedFilesystemList GetMountedFilesystems (const DevicePath &devicePath = DevicePath(), const DirectoryPath &mountPoint = DirectoryPath()) const = 0;

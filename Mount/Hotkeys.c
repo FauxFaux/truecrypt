@@ -1,7 +1,7 @@
 /*
  Copyright (c) 2005 TrueCrypt Foundation. All rights reserved.
 
- Governed by the TrueCrypt License 2.6 the full text of which is contained
+ Governed by the TrueCrypt License 2.7 the full text of which is contained
  in the file License.txt included in TrueCrypt binary and source code
  distribution packages.
 */
@@ -195,6 +195,10 @@ static void DisplayHotkeyList (HWND hwndDlg)
 			item.pszText = GetString ("HK_WIPE_CACHE");
 			break;
 
+		case HK_DISMOUNT_ALL_AND_WIPE:	
+			item.pszText = GetString ("HK_DISMOUNT_ALL_AND_WIPE");
+			break;
+
 		case HK_FORCE_DISMOUNT_ALL_AND_WIPE:	
 			item.pszText = GetString ("HK_FORCE_DISMOUNT_ALL_AND_WIPE");
 			break;
@@ -209,6 +213,10 @@ static void DisplayHotkeyList (HWND hwndDlg)
 
 		case HK_SHOW_HIDE_MAIN_WINDOW:	
 			item.pszText = GetString ("HK_SHOW_HIDE_MAIN_WINDOW");
+			break;
+
+		case HK_CLOSE_SECURITY_TOKEN_SESSIONS:
+			item.pszText = GetString ("IDM_CLOSE_ALL_TOKEN_SESSIONS");
 			break;
 
 		default:		
