@@ -4,8 +4,8 @@
  Copyright (c) 1998-2000 Paul Le Roux and which is governed by the 'License
  Agreement for Encryption for the Masses'. Modifications and additions to
  the original source code (contained in this file) and all other portions of
- this file are Copyright (c) 2003-2008 TrueCrypt Foundation and are governed
- by the TrueCrypt License 2.6 the full text of which is contained in the
+ this file are Copyright (c) 2003-2009 TrueCrypt Foundation and are governed
+ by the TrueCrypt License 2.7 the full text of which is contained in the
  file License.txt included in TrueCrypt binary and source code distribution
  packages. */
 
@@ -406,6 +406,9 @@ BOOL DoRegInstall (HWND hwndDlg, char *szDestDir, BOOL bInstallType)
 			strcpy (szTmp, VERSION_STRING);
 			RegSetValueEx (hkey, "DisplayVersion", 0, REG_SZ, (BYTE *) szTmp, strlen (szTmp) + 1);
 
+			strcpy (szTmp, TC_HOMEPAGE);
+			RegSetValueEx (hkey, "URLInfoAbout", 0, REG_SZ, (BYTE *) szTmp, strlen (szTmp) + 1);
+
 			RegCloseKey (hkey);
 		}
 
@@ -468,6 +471,13 @@ BOOL DoRegInstall (HWND hwndDlg, char *szDestDir, BOOL bInstallType)
 		hkey = 0;
 
 		key = "Software\\Classes\\.tc";
+		BOOL typeClassChanged = TRUE;
+		char typeClass[256];
+		DWORD typeClassSize = sizeof (typeClass);
+
+		if (ReadLocalMachineRegistryString (key, "", typeClass, &typeClassSize) && typeClassSize > 0 && strcmp (typeClass, "TrueCryptVolume") == 0)
+			typeClassChanged = FALSE;
+
 		RegMessage (hwndDlg, key);
 		if (RegCreateKeyEx (HKEY_LOCAL_MACHINE,
 				    key,
@@ -480,6 +490,9 @@ BOOL DoRegInstall (HWND hwndDlg, char *szDestDir, BOOL bInstallType)
 		
 		RegCloseKey (hkey);
 		hkey = 0;
+
+		if (typeClassChanged)
+			SHChangeNotify (SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
 	}
 
 	key = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TrueCrypt";
@@ -514,7 +527,7 @@ BOOL DoRegInstall (HWND hwndDlg, char *szDestDir, BOOL bInstallType)
 	if (RegSetValueEx (hkey, "Publisher", 0, REG_SZ, (BYTE *) szTmp, strlen (szTmp) + 1) != ERROR_SUCCESS)
 		goto error;
 
-	sprintf (szTmp, "%s&dest=index", TC_APPLINK);
+	strcpy (szTmp, TC_HOMEPAGE);
 	if (RegSetValueEx (hkey, "URLInfoAbout", 0, REG_SZ, (BYTE *) szTmp, strlen (szTmp) + 1) != ERROR_SUCCESS)
 		goto error;
 		
@@ -531,7 +544,7 @@ error:
 	}
 	
 	// Register COM servers for UAC
-	if (nCurrentOS == WIN_VISTA_OR_LATER)
+	if (IsOSAtLeast (WIN_VISTA))
 	{
 		if (!RegisterComServers (szDir))
 		{
@@ -597,7 +610,7 @@ BOOL DoRegUninstall (HWND hwndDlg, BOOL bRemoveDeprecated)
 	char regk [64];
 
 	// Unregister COM servers
-	if (!bRemoveDeprecated && nCurrentOS == WIN_VISTA_OR_LATER)
+	if (!bRemoveDeprecated && IsOSAtLeast (WIN_VISTA))
 	{
 		if (!UnregisterComServers (InstallationPath))
 			StatusMessage (hwndDlg, "COM_DEREG_FAILED");
@@ -622,6 +635,7 @@ BOOL DoRegUninstall (HWND hwndDlg, BOOL bRemoveDeprecated)
 		DeleteRegistryValue (regk, "TrueCrypt");
 
 		RegDeleteKey (HKEY_LOCAL_MACHINE, "Software\\Classes\\.tc");
+		SHChangeNotify (SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
 	}
 
 	bOK = TRUE;
@@ -660,12 +674,16 @@ retry:
 
 	if (strcmp ("truecrypt", lpszService) == 0)
 	{
-		BootEncryption bootEnc (hwndDlg);
-		if (bootEnc.GetDriverServiceStartType() == SERVICE_BOOT_START)
+		try
 		{
-			bootEnc.RegisterFilterDriver (false, false);
-			bootEnc.RegisterFilterDriver (false, true);
+			BootEncryption bootEnc (hwndDlg);
+			if (bootEnc.GetDriverServiceStartType() == SERVICE_BOOT_START)
+			{
+				bootEnc.RegisterFilterDriver (false, false);
+				bootEnc.RegisterFilterDriver (false, true);
+			}
 		}
+		catch (...) { }
 
 		StatusMessage (hwndDlg, "STOPPING_DRIVER");
 	}
@@ -800,7 +818,6 @@ BOOL DoDriverUnload (HWND hwndDlg)
 		int refCount;
 		DWORD dwResult;
 		BOOL bResult;
-		int volumesMounted;
 
 		// Try to determine if it's upgrade (and not reinstall, downgrade, or first-time install).
 		bResult = DeviceIoControl (hDriver, TC_IOCTL_GET_DRIVER_VERSION, NULL, 0, &driverVersion, sizeof (driverVersion), &dwResult, NULL);
@@ -844,6 +861,12 @@ BOOL DoDriverUnload (HWND hwndDlg)
 				}
 				else
 				{
+					if (CurrentOSMajor == 6 && CurrentOSMinor == 0 && CurrentOSServicePack < 1
+						&& AskWarnNoYes ("SYS_ENCRYPTION_VISTA_SP1_RECOMMENDED") == IDNO)
+					{
+						AbortProcessSilent();
+					}
+
 					SystemEncryptionUpgrade = TRUE;
 				}
 			}
@@ -852,6 +875,8 @@ BOOL DoDriverUnload (HWND hwndDlg)
 
 		if (!SystemEncryptionUpgrade)
 		{
+			int volumesMounted = 0;
+
 			// Check mounted volumes
 			bResult = DeviceIoControl (hDriver, TC_IOCTL_IS_ANY_VOLUME_MOUNTED, NULL, 0, &volumesMounted, sizeof (volumesMounted), &dwResult, NULL);
 
@@ -1090,7 +1115,7 @@ BOOL DoShortcutsInstall (HWND hwndDlg, char *szDestDir, BOOL bProgGroup, BOOL bD
 		f = fopen (szTmp2, "w");
 		if (f)
 		{
-			fprintf (f, "[InternetShortcut]\nURL=%s&dest=index\n", TC_APPLINK);
+			fprintf (f, "[InternetShortcut]\nURL=%s\n", TC_HOMEPAGE);
 			fclose (f);
 		}
 		else
@@ -1157,7 +1182,7 @@ void OutcomePrompt (HWND hwndDlg, BOOL bOK)
 				PostMessage (MainDlg, WM_CLOSE, 0, 0);
 			else if (bFirstTimeInstall && !SystemEncryptionUpgrade && !bUpgrade && !bDowngrade && !bRepairMode)
 				Info ("INSTALL_OK");
-			else
+			else if (!(SystemEncryptionUpgrade && bUpgrade))
 				Info ("SETUP_UPDATE_OK");
 		}
 		else
@@ -1218,8 +1243,6 @@ static void SetSystemRestorePoint (HWND hwndDlg, BOOL finalize)
 		{
 			StatusMessage (hwndDlg, "FAILED_SYS_RESTORE");
 		}
-		else
-			StatusMessage (hwndDlg, "SYS_RESTORE_CREATED");
 	}
 }
 

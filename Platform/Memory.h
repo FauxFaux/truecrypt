@@ -1,7 +1,7 @@
 /*
- Copyright (c) 2008 TrueCrypt Foundation. All rights reserved.
+ Copyright (c) 2008-2009 TrueCrypt Foundation. All rights reserved.
 
- Governed by the TrueCrypt License 2.6 the full text of which is contained
+ Governed by the TrueCrypt License 2.7 the full text of which is contained
  in the file License.txt included in TrueCrypt binary and source code
  distribution packages.
 */
@@ -28,6 +28,15 @@
 #		include <machine/endian.h>
 #	elif defined (TC_BSD)
 #		include <sys/endian.h>
+#	elif defined (TC_SOLARIS)
+#		include <sys/types.h>
+#		define LITTLE_ENDIAN 1234
+#		define BIG_ENDIAN 4321
+#		ifdef _BIG_ENDIAN
+#			define BYTE_ORDER BIG_ENDIAN
+#		else
+#			define BYTE_ORDER LITTLE_ENDIAN
+#		endif
 #	else
 #		include <endian.h>
 #	endif
