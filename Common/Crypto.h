@@ -3,11 +3,11 @@
  derived from the source code of Encryption for the Masses 2.02a, which is
  Copyright (c) 1998-2000 Paul Le Roux and which is governed by the 'License
  Agreement for Encryption for the Masses'. Modifications and additions to
- the original source code (contained in this file) and all other portions of
- this file are Copyright (c) 2003-2009 TrueCrypt Foundation and are governed
- by the TrueCrypt License 2.7 the full text of which is contained in the
- file License.txt included in TrueCrypt binary and source code distribution
- packages. */
+ the original source code (contained in this file) and all other portions
+ of this file are Copyright (c) 2003-2009 TrueCrypt Developers Association
+ and are governed by the TrueCrypt License 2.8 the full text of which is
+ contained in the file License.txt included in TrueCrypt binary and source
+ code distribution packages. */
 
 /* Update the following when adding a new cipher or EA:
 
@@ -299,9 +299,9 @@ BOOL HashIsDeprecated (int hashId);
 
 int GetMaxPkcs5OutSize (void);
 
-void EncryptDataUnits (unsigned __int8 *buf, const UINT64_STRUCT *structUnitNo, TC_LARGEST_COMPILER_UINT nbrUnits, PCRYPTO_INFO ci);
+void EncryptDataUnits (unsigned __int8 *buf, const UINT64_STRUCT *structUnitNo, uint32 nbrUnits, PCRYPTO_INFO ci);
 void EncryptDataUnitsCurrentThread (unsigned __int8 *buf, const UINT64_STRUCT *structUnitNo, TC_LARGEST_COMPILER_UINT nbrUnits, PCRYPTO_INFO ci);
-void DecryptDataUnits (unsigned __int8 *buf, const UINT64_STRUCT *structUnitNo, TC_LARGEST_COMPILER_UINT nbrUnits, PCRYPTO_INFO ci);
+void DecryptDataUnits (unsigned __int8 *buf, const UINT64_STRUCT *structUnitNo, uint32 nbrUnits, PCRYPTO_INFO ci);
 void DecryptDataUnitsCurrentThread (unsigned __int8 *buf, const UINT64_STRUCT *structUnitNo, TC_LARGEST_COMPILER_UINT nbrUnits, PCRYPTO_INFO ci);
 void EncryptBuffer (unsigned __int8 *buf, TC_LARGEST_COMPILER_UINT len, PCRYPTO_INFO cryptoInfo);
 void DecryptBuffer (unsigned __int8 *buf, TC_LARGEST_COMPILER_UINT len, PCRYPTO_INFO cryptoInfo);

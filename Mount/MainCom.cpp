@@ -1,9 +1,9 @@
 /*
- Copyright (c) 2007-2009 TrueCrypt Foundation. All rights reserved.
+ Copyright (c) 2007-2009 TrueCrypt Developers Association. All rights reserved.
 
- Governed by the TrueCrypt License 2.7 the full text of which is contained
- in the file License.txt included in TrueCrypt binary and source code
- distribution packages.
+ Governed by the TrueCrypt License 2.8 the full text of which is contained in
+ the file License.txt included in TrueCrypt binary and source code distribution
+ packages.
 */
 
 #include <atlcomcli.h>
@@ -92,7 +92,17 @@ public:
 		MainDlg = (HWND) hWnd;
 		return ::ChangePwd (CW2A (volumePath), oldPassword, newPassword, pkcs5, (HWND) hWnd);
 	}
-	
+
+	virtual DWORD STDMETHODCALLTYPE CopyFile (BSTR sourceFile, BSTR destinationFile)
+	{
+		return BaseCom::CopyFile (sourceFile, destinationFile);
+	}
+
+	virtual DWORD STDMETHODCALLTYPE DeleteFile (BSTR file)
+	{
+		return BaseCom::DeleteFile (file);
+	}
+
 	virtual BOOL STDMETHODCALLTYPE IsPagingFileActive (BOOL checkNonWindowsPartitionsOnly)
 	{
 		return BaseCom::IsPagingFileActive (checkNonWindowsPartitionsOnly);
@@ -106,6 +116,11 @@ public:
 	virtual DWORD STDMETHODCALLTYPE RegisterFilterDriver (BOOL registerDriver, BOOL volumeClass)
 	{
 		return BaseCom::RegisterFilterDriver (registerDriver, volumeClass);
+	}
+
+	virtual DWORD STDMETHODCALLTYPE RegisterSystemFavoritesService (BOOL registerService)
+	{
+		return BaseCom::RegisterSystemFavoritesService (registerService);
 	}
 
 	virtual DWORD STDMETHODCALLTYPE SetDriverServiceStartType (DWORD startType)

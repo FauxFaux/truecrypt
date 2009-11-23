@@ -1,4 +1,4 @@
-This archive contains the source code of TrueCrypt 6.2a.
+This archive contains the source code of TrueCrypt 6.3a.
 
 
 Important
@@ -28,7 +28,9 @@ III. OpenSolaris and FreeBSD
 
 IV. Third-Party Developers (Contributors)
 
-V. Further Information
+V. Legal Information
+
+VI. Further Information
 
 
 
@@ -40,11 +42,11 @@ Requirements for Building TrueCrypt for Windows:
 
 - Microsoft Visual C++ 2008 SP1 (Professional Edition or compatible)
 - Microsoft Visual C++ 1.52 (available from MSDN Subscriber Downloads)
-- Microsoft Windows Driver Kit for Windows Server 2008 (build 6001.18002)
+- Microsoft Windows SDK for Windows 7
+- Microsoft Windows Driver Kit 7.0.0 (build 7600.16385.0)
 - RSA Security Inc. PKCS #11 Cryptographic Token Interface (Cryptoki) 2.20
   header files (available at ftp://ftp.rsasecurity.com/pub/pkcs/pkcs-11/v2-20)
-- NASM 0.99 assembler
-- Yasm assembler
+- NASM assembler (2.06 or compatible)
 - gzip compressor
 
 IMPORTANT:
@@ -60,10 +62,11 @@ issued by a certification authority. At the end of each official .exe and
 certification authority certificates, CA-MS cross-certificate, and the
 TrueCrypt Foundation certificate). Keep this in mind if you compile TrueCrypt
 and compare your binaries with the official binaries. If your binaries are
-unsigned, the sizes of the official binaries will usually be approximately 
-10 KB greater than sizes of your binaries (if you use a different version of
-compiler or if you install a different or no service pack for Visual Studio,
-there may be further differences).
+unsigned, the sizes of the official binaries will usually be approximately
+10 KB greater than sizes of your binaries (there may be further differences
+if you use a different version of the compiler, or if you install a different
+or no service pack for Visual Studio, or different hotfixes for it, or if you
+use different versions of the required SDKs).
 
 
 Instructions for Building TrueCrypt for Windows:
@@ -99,7 +102,7 @@ Requirements for Building TrueCrypt for Linux and Mac OS X:
 
 - GNU Make
 - GNU C++ Compiler 4.0 or compatible
-- Apple XCode (Mac OS X only)
+- Apple Xcode (Mac OS X only)
 - pkg-config
 - wxWidgets 2.8 shared library and header files installed or
   wxWidgets 2.8 library source code (available at http://www.wxwidgets.org)
@@ -184,7 +187,38 @@ http://www.truecrypt.org/contact
 
 
 
-V. Further Information
-======================
+V. Legal Information
+====================
+
+Copyright Information
+---------------------
+
+This software as a whole:
+Copyright (c) 2009 TrueCrypt Developers Association. All rights reserved.
+
+Portions of this software:
+Copyright (c) 2003-2009 TrueCrypt Developers Association. All rights reserved.
+Copyright (c) 1998-2000 Paul Le Roux. All rights reserved.
+Copyright (c) 1998-2008 Brian Gladman, Worcester, UK. All rights reserved.
+Copyright (c) 2002-2004 Mark Adler. All rights reserved.
+For more information, please see the legal notices attached to parts of the
+source code.
+
+Trademark Information
+---------------------
+
+TrueCrypt and the TrueCrypt logo are registered trademarks.
+Note: The goal is not to monetize the name or the product, but to protect
+the reputation of TrueCrypt, and to prevent support issues and other kinds
+of issues that might arise from the existence of similar products with
+the same or similar name. Even though TrueCrypt is a trademark, TrueCrypt
+is and will remain open-source and free software.
+
+Any other trademarks are the sole property of their respective owners.
+
+
+
+VI. Further Information
+=======================
 
 http://www.truecrypt.org

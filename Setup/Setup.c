@@ -3,19 +3,22 @@
  derived from the source code of Encryption for the Masses 2.02a, which is
  Copyright (c) 1998-2000 Paul Le Roux and which is governed by the 'License
  Agreement for Encryption for the Masses'. Modifications and additions to
- the original source code (contained in this file) and all other portions of
- this file are Copyright (c) 2003-2009 TrueCrypt Foundation and are governed
- by the TrueCrypt License 2.7 the full text of which is contained in the
- file License.txt included in TrueCrypt binary and source code distribution
- packages. */
+ the original source code (contained in this file) and all other portions
+ of this file are Copyright (c) 2003-2009 TrueCrypt Developers Association
+ and are governed by the TrueCrypt License 2.8 the full text of which is
+ contained in the file License.txt included in TrueCrypt binary and source
+ code distribution packages. */
 
 #include "Tcdefs.h"
 #include <SrRestorePtApi.h>
+#include <propkey.h>
+#include <propvarutil.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
 #include "Apidrvr.h"
 #include "BootEncryption.h"
+#include "Boot/Windows/BootCommon.h"
 #include "Combo.h"
 #include "ComSetup.h"
 #include "Dlgcode.h"
@@ -29,7 +32,6 @@
 #include "Wizard.h"
 
 #include "../Common/Resource.h"
-#include "../Mount/Mount.h"
 
 using namespace TrueCrypt;
 
@@ -58,6 +60,7 @@ BOOL bChangeMode = FALSE;
 BOOL bDevm = FALSE;
 BOOL bFirstTimeInstall = FALSE;
 BOOL bUninstallInProgress = FALSE;
+BOOL UnloadDriver = TRUE;
 
 BOOL bSystemRestore = TRUE;
 BOOL bDisableSwapFiles = FALSE;
@@ -65,6 +68,8 @@ BOOL bForAllUsers = TRUE;
 BOOL bRegisterFileExt = TRUE;
 BOOL bAddToStartMenu = TRUE;
 BOOL bDesktopIcon = TRUE;
+
+BOOL bDesktopIconStatusDetermined = FALSE;
 
 HMODULE volatile SystemRestoreDll = 0;
 
@@ -113,6 +118,26 @@ HRESULT CreateLink (char *lpszPathObj, char *lpszArguments,
 		   description.  */
 		psl->SetPath (lpszPathObj);
 		psl->SetArguments (lpszArguments);
+
+		// Application ID
+		if (strstr (lpszPathObj, TC_APP_NAME ".exe"))
+		{
+			IPropertyStore *propStore;
+
+			if (SUCCEEDED (psl->QueryInterface (IID_PPV_ARGS (&propStore))))
+			{
+				PROPVARIANT propVariant;
+				if (SUCCEEDED (InitPropVariantFromString (TC_APPLICATION_ID, &propVariant)))
+				{
+					if (SUCCEEDED (propStore->SetValue (PKEY_AppUserModel_ID, propVariant)))
+						propStore->Commit();
+
+					PropVariantClear (&propVariant);
+				}
+
+				propStore->Release();
+			}
+		}
 
 		/* Query IShellLink for the IPersistFile interface for saving
 		   the shortcut in persistent storage.  */
@@ -198,6 +223,47 @@ void RemoveMessage (HWND hwndDlg, char *txt)
 void IconMessage (HWND hwndDlg, char *txt)
 {
 	StatusMessageParam (hwndDlg, "ADDING_ICON", txt);
+}
+
+void DetermineUpgradeDowngradeStatus (BOOL bCloseDriverHandle, LONG *driverVersionPtr)
+{
+	LONG driverVersion = VERSION_NUM;
+
+	if (hDriver == INVALID_HANDLE_VALUE)
+		DriverAttach();
+
+	if (hDriver != INVALID_HANDLE_VALUE)
+	{
+		DWORD dwResult;
+		BOOL bResult = DeviceIoControl (hDriver, TC_IOCTL_GET_DRIVER_VERSION, NULL, 0, &driverVersion, sizeof (driverVersion), &dwResult, NULL);
+
+		if (!bResult)
+			bResult = DeviceIoControl (hDriver, TC_IOCTL_LEGACY_GET_DRIVER_VERSION, NULL, 0, &driverVersion, sizeof (driverVersion), &dwResult, NULL);
+
+		bUpgrade = (bResult && driverVersion < VERSION_NUM);
+		bDowngrade = (bResult && driverVersion > VERSION_NUM);
+
+		if (bCloseDriverHandle)
+		{
+			CloseHandle (hDriver);
+			hDriver = INVALID_HANDLE_VALUE;
+		}
+	}
+
+	*driverVersionPtr = driverVersion;
+}
+
+
+static BOOL IsFileInUse (const string &filePath)
+{
+	HANDLE useTestHandle = CreateFile (filePath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+
+	if (useTestHandle != INVALID_HANDLE_VALUE)
+		CloseHandle (useTestHandle);
+	else if (GetLastError() == ERROR_SHARING_VIOLATION)
+		return TRUE;
+
+	return FALSE;
 }
 
 
@@ -318,6 +384,16 @@ BOOL DoFilesInstall (HWND hwndDlg, char *szDestDir)
 				{
 					bResult = TCCopyFile (curFileName, szTmp);
 				}
+
+				if (bResult && strcmp (szFiles[i], "ATrueCrypt.exe") == 0)
+				{
+					string servicePath = GetServiceConfigPath (TC_APP_NAME ".exe");
+					if (FileExists (servicePath.c_str()))
+					{
+						CopyMessage (hwndDlg, (char *) servicePath.c_str());
+						bResult = CopyFile (szTmp, servicePath.c_str(), FALSE);
+					}
+				}
 			}
 		}
 		else
@@ -437,6 +513,10 @@ BOOL DoRegInstall (HWND hwndDlg, char *szDestDir, BOOL bInstallType)
 
 		strcpy (szTmp, "TrueCrypt Volume");
 		if (RegSetValueEx (hkey, "", 0, REG_SZ, (BYTE *) szTmp, strlen (szTmp) + 1) != ERROR_SUCCESS)
+			goto error;
+
+		sprintf (szTmp, "%ws", TC_APPLICATION_ID);
+		if (RegSetValueEx (hkey, "AppUserModelID", 0, REG_SZ, (BYTE *) szTmp, strlen (szTmp) + 1) != ERROR_SUCCESS)
 			goto error;
 
 		RegCloseKey (hkey);
@@ -820,13 +900,7 @@ BOOL DoDriverUnload (HWND hwndDlg)
 		BOOL bResult;
 
 		// Try to determine if it's upgrade (and not reinstall, downgrade, or first-time install).
-		bResult = DeviceIoControl (hDriver, TC_IOCTL_GET_DRIVER_VERSION, NULL, 0, &driverVersion, sizeof (driverVersion), &dwResult, NULL);
-
-		if (!bResult)
-			bResult = DeviceIoControl (hDriver, TC_IOCTL_LEGACY_GET_DRIVER_VERSION, NULL, 0, &driverVersion, sizeof (driverVersion), &dwResult, NULL);
-
-		bUpgrade = bResult && driverVersion < VERSION_NUM;
-		bDowngrade = bResult && driverVersion > VERSION_NUM;
+		DetermineUpgradeDowngradeStatus (FALSE, &driverVersion);
 
 		// Test for encrypted boot drive
 		try
@@ -856,7 +930,7 @@ BOOL DoDriverUnload (HWND hwndDlg)
 				}
 				else if (bUninstallInProgress || bDowngrade)
 				{
-					Error ("SETUP_FAILED_BOOT_DRIVE_ENCRYPTED");
+					Error (bDowngrade ? "SETUP_FAILED_BOOT_DRIVE_ENCRYPTED_DOWNGRADE" : "SETUP_FAILED_BOOT_DRIVE_ENCRYPTED");
 					return FALSE;
 				}
 				else
@@ -873,7 +947,14 @@ BOOL DoDriverUnload (HWND hwndDlg)
 		}
 		catch (...)	{ }
 
-		if (!SystemEncryptionUpgrade)
+		if (!bUninstall
+			&& (bUpgrade || SystemEncryptionUpgrade)
+			&& (!bDevm || SystemEncryptionUpgrade))
+		{
+			UnloadDriver = FALSE;
+		}
+
+		if (UnloadDriver)
 		{
 			int volumesMounted = 0;
 
@@ -914,16 +995,19 @@ BOOL DoDriverUnload (HWND hwndDlg)
 		}
 
 		// Test for any applications attached to driver
-		bResult = DeviceIoControl (hDriver, TC_IOCTL_GET_DEVICE_REFCOUNT, &refCount, sizeof (refCount), &refCount,
-			sizeof (refCount), &dwResult, NULL);
-
-		if (bOK && bResult && refCount > 1)
+		if (!bUpgrade)
 		{
-			MessageBoxW (hwndDlg, GetString ("CLOSE_TC_FIRST"), lpszTitle, MB_ICONSTOP);
-			bOK = FALSE;
+			bResult = DeviceIoControl (hDriver, TC_IOCTL_GET_DEVICE_REFCOUNT, &refCount, sizeof (refCount), &refCount,
+				sizeof (refCount), &dwResult, NULL);
+
+			if (bOK && bResult && refCount > 1)
+			{
+				MessageBoxW (hwndDlg, GetString ("CLOSE_TC_FIRST"), lpszTitle, MB_ICONSTOP);
+				bOK = FALSE;
+			}
 		}
 
-		if (!bOK || !SystemEncryptionUpgrade)
+		if (!bOK || UnloadDriver)
 		{
 			CloseHandle (hDriver);
 			hDriver = INVALID_HANDLE_VALUE;
@@ -951,7 +1035,9 @@ BOOL UpgradeBootLoader (HWND hwndDlg)
 			StatusMessage (hwndDlg, "INSTALLER_UPDATING_BOOT_LOADER");
 
 			bootEnc.InstallBootLoader (true);
-			Info (IsHiddenOSRunning () ? "BOOT_LOADER_UPGRADE_OK_HIDDEN_OS" : "BOOT_LOADER_UPGRADE_OK");
+
+			if (bootEnc.GetInstalledBootLoaderVersion() <= TC_RESCUE_DISK_UPGRADE_NOTICE_MAX_VERSION)
+				Info (IsHiddenOSRunning() ? "BOOT_LOADER_UPGRADE_OK_HIDDEN_OS" : "BOOT_LOADER_UPGRADE_OK");
 		}
 		return TRUE;
 	}
@@ -1182,7 +1268,7 @@ void OutcomePrompt (HWND hwndDlg, BOOL bOK)
 				PostMessage (MainDlg, WM_CLOSE, 0, 0);
 			else if (bFirstTimeInstall && !SystemEncryptionUpgrade && !bUpgrade && !bDowngrade && !bRepairMode)
 				Info ("INSTALL_OK");
-			else if (!(SystemEncryptionUpgrade && bUpgrade))
+			else if (!bRestartRequired)
 				Info ("SETUP_UPDATE_OK");
 		}
 		else
@@ -1380,6 +1466,19 @@ void DoInstall (void *arg)
 		return;
 	}
 
+	if (bUpgrade
+		&& (IsFileInUse (string (InstallationPath) + '\\' + TC_APP_NAME ".exe")
+			|| IsFileInUse (string (InstallationPath) + '\\' + TC_APP_NAME " Format.exe")
+			|| IsFileInUse (string (InstallationPath) + '\\' + TC_APP_NAME " Setup.exe")
+			)
+		)
+	{
+		NormalCursor ();
+		Error ("CLOSE_TC_FIRST");
+		PostMessage (MainDlg, TC_APPMSG_INSTALL_FAILURE, 0, 0);
+		return;
+	}
+
 	UpdateProgressBarProc(12);
 	
 	if (bSystemRestore)
@@ -1415,7 +1514,7 @@ void DoInstall (void *arg)
 	strcat_s (path, sizeof (path), "\\TrueCrypt Setup.exe");
 	DeleteFile (path);
 
-	if (UpdateProgressBarProc(63) && !SystemEncryptionUpgrade && DoServiceUninstall (hwndDlg, "truecrypt") == FALSE)
+	if (UpdateProgressBarProc(63) && UnloadDriver && DoServiceUninstall (hwndDlg, "truecrypt") == FALSE)
 	{
 		bOK = FALSE;
 	}
@@ -1427,7 +1526,7 @@ void DoInstall (void *arg)
 	{
 		bOK = FALSE;
 	}
-	else if (UpdateProgressBarProc(85) && !SystemEncryptionUpgrade && DoDriverInstall (hwndDlg) == FALSE)
+	else if (UpdateProgressBarProc(85) && UnloadDriver && DoDriverInstall (hwndDlg) == FALSE)
 	{
 		bOK = FALSE;
 	}
@@ -1440,12 +1539,20 @@ void DoInstall (void *arg)
 		bOK = FALSE;
 	}
 
+	if (!UnloadDriver)
+		bRestartRequired = TRUE;
+
 	try
 	{
 		bootEnc.RenameDeprecatedSystemLoaderBackup();
 	}
 	catch (...)	{ }
 
+	string sysFavorites = GetServiceConfigPath (TC_APPD_FILENAME_SYSTEM_FAVORITE_VOLUMES);
+	string legacySysFavorites = GetProgramConfigPath ("System Favorite Volumes.xml");
+
+	if (FileExists (legacySysFavorites.c_str()) && !FileExists (sysFavorites.c_str()))
+		MoveFile (legacySysFavorites.c_str(), sysFavorites.c_str());
 
 	if (bOK)
 		UpdateProgressBarProc(97);
@@ -1510,12 +1617,12 @@ void DoInstall (void *arg)
 				}
 			}
 		}
+	}
 
-		if (bRestartRequired || (SystemEncryptionUpgrade && bUpgrade))
-		{
-			if (AskYesNo (SystemEncryptionUpgrade ? "UPGRADE_OK_REBOOT_REQUIRED" : "CONFIRM_RESTART") == IDYES)
-				RestartComputer();
-		}
+	if (bOK && bRestartRequired)
+	{
+		if (AskYesNo (bUpgrade ? "UPGRADE_OK_REBOOT_REQUIRED" : "CONFIRM_RESTART") == IDYES)
+			RestartComputer();
 	}
 }
 
@@ -1743,7 +1850,7 @@ BOOL CALLBACK UninstallDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lP
 }
 
 
-int WINAPI WINMAIN (HINSTANCE hInstance, HINSTANCE hPrevInstance, char *lpszCommandLine, int nCmdShow)
+int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, char *lpszCommandLine, int nCmdShow)
 {
 	atexit (localcleanup);
 
