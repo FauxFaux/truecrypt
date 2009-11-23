@@ -1,9 +1,9 @@
 /*
- Copyright (c) 2008-2009 TrueCrypt Foundation. All rights reserved.
+ Copyright (c) 2008-2009 TrueCrypt Developers Association. All rights reserved.
 
- Governed by the TrueCrypt License 2.7 the full text of which is contained
- in the file License.txt included in TrueCrypt binary and source code
- distribution packages.
+ Governed by the TrueCrypt License 2.8 the full text of which is contained in
+ the file License.txt included in TrueCrypt binary and source code distribution
+ packages.
 */
 
 #include "Platform/SystemException.h"
@@ -36,7 +36,7 @@ namespace TrueCrypt
 		vector <string> versionStrings = StringConverter::Split (unameData.release, ".");
 		vector <int> version;
 
-		for (int i = 0; i < versionStrings.size(); ++i)
+		for (size_t i = 0; i < versionStrings.size(); ++i)
 		{
 			string s = versionStrings[i];
 

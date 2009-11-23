@@ -1,9 +1,9 @@
 /*
- Copyright (c) 2008-2009 TrueCrypt Foundation. All rights reserved.
+ Copyright (c) 2008-2009 TrueCrypt Developers Association. All rights reserved.
 
- Governed by the TrueCrypt License 2.7 the full text of which is contained
- in the file License.txt included in TrueCrypt binary and source code
- distribution packages.
+ Governed by the TrueCrypt License 2.8 the full text of which is contained in
+ the file License.txt included in TrueCrypt binary and source code distribution
+ packages.
 */
 
 #ifndef TC_HEADER_Main_UserInterface
@@ -45,6 +45,7 @@ namespace TrueCrypt
 		virtual void DoShowWarning (const wxString &message) const = 0;
 		virtual void EndBusyState () const = 0;
 		virtual wxString ExceptionToMessage (const exception &ex) const;
+		virtual void ExportSecurityTokenKeyfile () const = 0;
 		virtual shared_ptr <GetStringFunctor> GetAdminPasswordRequestHandler () = 0;
 		virtual const UserPreferences &GetPreferences () const { return Preferences; }
 		virtual void ImportSecurityTokenKeyfiles () const = 0;

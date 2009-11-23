@@ -1,9 +1,9 @@
 /*
- Copyright (c) 2008-2009 TrueCrypt Foundation. All rights reserved.
+ Copyright (c) 2008-2009 TrueCrypt Developers Association. All rights reserved.
 
- Governed by the TrueCrypt License 2.7 the full text of which is contained
- in the file License.txt included in TrueCrypt binary and source code
- distribution packages.
+ Governed by the TrueCrypt License 2.8 the full text of which is contained in
+ the file License.txt included in TrueCrypt binary and source code distribution
+ packages.
 */
 
 #include <fstream>
@@ -46,8 +46,18 @@ namespace TrueCrypt
 			}
 			catch (ExecutedProcessFailed &e)
 			{
-				if (e.GetErrorOutput().find("49153") != string::npos)
-					throw MountedVolumeInUse (SRC_POS);
+				if (!ignoreOpenFiles)
+				{
+					string err = e.GetErrorOutput();
+
+					if (err.find ("couldn't unmount") != string::npos
+						|| err.find ("busy") != string::npos
+						|| err.find ("49153") != string::npos)
+					{
+						throw MountedVolumeInUse (SRC_POS);
+					}
+				}
+
 				throw;
 			}
 		}
@@ -123,6 +133,8 @@ namespace TrueCrypt
 		args.push_back (volImage);
 		args.push_back ("-plist");
 		args.push_back ("-noautofsck");
+		args.push_back ("-imagekey");
+		args.push_back ("diskimage-class=CRawDiskImage");
 
 		if (!options.NoFilesystem && options.MountPoint && !options.MountPoint->IsEmpty())
 		{

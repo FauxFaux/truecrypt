@@ -1,9 +1,9 @@
 /*
- Copyright (c) 2008 TrueCrypt Foundation. All rights reserved.
+ Copyright (c) 2008 TrueCrypt Developers Association. All rights reserved.
 
- Governed by the TrueCrypt License 2.7 the full text of which is contained
- in the file License.txt included in TrueCrypt binary and source code
- distribution packages.
+ Governed by the TrueCrypt License 2.8 the full text of which is contained in
+ the file License.txt included in TrueCrypt binary and source code distribution
+ packages.
 */
 
 #ifndef TC_HEADER_Volume_VolumePasswordCache
@@ -23,7 +23,7 @@ namespace TrueCrypt
 		static bool IsEmpty () { return CachedPasswords.empty(); }
 		static void Store (const VolumePassword &newPassword);
 		static void Clear () { CachedPasswords.clear(); }
-		static const int Capacity = 4;
+		static const size_t Capacity = 4;
 
 	protected:
 		static CachedPasswordList CachedPasswords;

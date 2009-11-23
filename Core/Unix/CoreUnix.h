@@ -1,9 +1,9 @@
 /*
- Copyright (c) 2008-2009 TrueCrypt Foundation. All rights reserved.
+ Copyright (c) 2008-2009 TrueCrypt Developers Association. All rights reserved.
 
- Governed by the TrueCrypt License 2.7 the full text of which is contained
- in the file License.txt included in TrueCrypt binary and source code
- distribution packages.
+ Governed by the TrueCrypt License 2.8 the full text of which is contained in
+ the file License.txt included in TrueCrypt binary and source code distribution
+ packages.
 */
 
 #ifndef TC_HEADER_Core_CoreUnix
@@ -32,7 +32,7 @@ namespace TrueCrypt
 		virtual int GetOSMinorVersion () const { throw NotApplicable (SRC_POS); }
 		virtual VolumeInfoList GetMountedVolumes (const VolumePath &volumePath = VolumePath()) const;
 		virtual bool IsDevicePresent (const DevicePath &device) const { throw NotApplicable (SRC_POS); }
-		virtual bool IsInTravelMode () const { return false; }
+		virtual bool IsInPortableMode () const { return false; }
 		virtual bool IsMountPointAvailable (const DirectoryPath &mountPoint) const;
 		virtual bool IsOSVersion (int major, int minor) const { throw NotApplicable (SRC_POS); }
 		virtual bool IsOSVersionLower (int major, int minor) const { throw NotApplicable (SRC_POS); }

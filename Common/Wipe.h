@@ -1,9 +1,9 @@
 /*
- Copyright (c) 2008 TrueCrypt Foundation. All rights reserved.
+ Copyright (c) 2008-2009 TrueCrypt Developers Association. All rights reserved.
 
- Governed by the TrueCrypt License 2.7 the full text of which is contained
- in the file License.txt included in TrueCrypt binary and source code
- distribution packages.
+ Governed by the TrueCrypt License 2.8 the full text of which is contained in
+ the file License.txt included in TrueCrypt binary and source code distribution
+ packages.
 */
 
 #ifndef TC_HEADER_Common_Wipe
@@ -30,7 +30,7 @@ typedef enum
 
 #define TC_WIPE_RAND_CHAR_COUNT 3
 
-size_t GetWipePassCount (WipeAlgorithmId algorithm);
+int GetWipePassCount (WipeAlgorithmId algorithm);
 BOOL WipeBuffer (WipeAlgorithmId algorithm, byte randChars[TC_WIPE_RAND_CHAR_COUNT], int pass, byte *buffer, size_t size);
 
 #ifdef __cplusplus

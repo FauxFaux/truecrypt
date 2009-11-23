@@ -31,7 +31,7 @@
  that developed by Karl Malbrain. His contribution is acknowledged.
  */
 
-/* Adapted by TrueCrypt Foundation:
+/* Adapted for TrueCrypt:
   - Macro-generated tables were replaced with static data to enable compiling
     with MSVC++ 1.5 which runs out of resources when expanding large macros.
 */
@@ -579,7 +579,7 @@ return_type aes_set_key( const unsigned char key[], length_type keylen, aes_cont
         break;
     default:
         ctx->rnd = 0;
-        return -1;
+        return (return_type) -1;
     }
     block_copy(ctx->ksch, key, keylen);
     hi = (keylen + 28) << 2;
@@ -645,7 +645,7 @@ return_type aes_encrypt( const unsigned char in[N_BLOCK], unsigned char  out[N_B
         copy_and_key( out, s1, ctx->ksch + r * N_BLOCK );
     }
     else
-        return -1;
+        return (return_type) -1;
     return 0;
 }
 
@@ -678,7 +678,7 @@ return_type aes_decrypt( const unsigned char in[N_BLOCK], unsigned char out[N_BL
         copy_and_key( out, s1, ctx->ksch );
     }
     else
-        return -1;
+        return (return_type) -1;
     return 0;
 }
 
