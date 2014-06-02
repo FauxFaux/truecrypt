@@ -34,6 +34,7 @@ export CC ?= gcc
 export CXX ?= g++
 export AS := nasm
 export RANLIB ?= ranlib
+export LIBS ?= -ldl
 
 export CFLAGS := -Wall
 export CXXFLAGS := -Wall -Wno-unused-parameter

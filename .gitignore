@@ -1,0 +1,9 @@
+*.o
+*.d
+*.a
+*~
+*.gch
+*.bmp.h
+/License.txt.h
+/Common/Language.xml.h
+/pkcs11*.h

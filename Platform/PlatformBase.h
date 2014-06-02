@@ -15,6 +15,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <typeinfo>
 #include <vector>
 
 #ifndef _MSC_VER
